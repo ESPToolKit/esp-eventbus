@@ -1,0 +1,30 @@
+{
+  "name": "ESPEventBus",
+  "version": "1.0.0",
+  "description": "A Lightweight event bus implementation for ESP32",
+  "keywords": [
+    "esp32",
+    "arduino",
+    "eventbus"
+  ],
+  "homepage": "https://github.com/ESPToolKit/esp-eventbus",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ESPToolKit/esp-eventbus.git"
+  },
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "zekageri"
+    }
+  ],
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "dependencies": [],
+  "headers": ["ESPEventBus.h"],
+  "build": {
+    "flags": [
+      "-std=gnu++17"
+    ]
+  }
+}
