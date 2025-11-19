@@ -14,12 +14,31 @@ using EventBusSub = uint32_t;
 
 using EventCallbackFn = void (*)(void* payload, void* userArg);
 
+enum class EventBusOverflowPolicy : uint8_t {
+    Block,
+    DropNewest,
+    DropOldest,
+};
+
+using EventBusQueuePressureFn = void (*)(UBaseType_t queued, UBaseType_t capacity, void* userArg);
+using EventBusDropFn = void (*)(EventBusId id, void* payload, void* userArg);
+using EventBusPayloadValidatorFn = bool (*)(EventBusId id, void* payload, void* userArg);
+
 struct EventBusConfig {
     uint16_t queueLength = 16;
     UBaseType_t taskPriority = 5;
     uint32_t taskStackWords = 4096;
     BaseType_t coreId = tskNO_AFFINITY;
     const char* taskName = "EventBus";
+    uint16_t maxSubscriptions = 0;  // 0 => unlimited
+    EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
+    uint8_t pressureThresholdPercent = 90;  // Percentage (1-100) before invoking pressure callback
+    EventBusQueuePressureFn pressureCallback = nullptr;
+    void* pressureUserArg = nullptr;
+    EventBusDropFn dropCallback = nullptr;
+    void* dropUserArg = nullptr;
+    EventBusPayloadValidatorFn payloadValidator = nullptr;
+    void* payloadValidatorArg = nullptr;
 };
 
 class EventBus {
@@ -90,11 +109,21 @@ class EventBus {
     void stopTask();
     void compactSubscriptionsLocked();
     static void waiterCallback(void* payload, void* userArg);
+    bool enqueueFromTask(const QueuedEvent& ev, TickType_t timeout);
+    bool enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityTaskWoken);
+    bool handleOverflowFromTask(const QueuedEvent& ev);
+    bool handleOverflowFromISR(const QueuedEvent& ev, BaseType_t* localWoken);
+    void emitPressureMetricFromTask();
+    void notifyDrop(EventBusId id, void* payload);
+    bool validatePayload(EventBusId id, void* payload) const;
+    void propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken);
 
     QueueHandle_t queue_ = nullptr;
     TaskHandle_t task_ = nullptr;
     SemaphoreHandle_t subMutex_ = nullptr;
     std::vector<Subscription> subs_;
     EventBusSub nextSubId_ = 0;
+    EventBusConfig config_{};
     bool running_ = false;
+    bool stopEventPending_ = false;
 };

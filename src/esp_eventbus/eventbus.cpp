@@ -2,6 +2,10 @@
 
 #include <algorithm>
 
+#if !defined(INCLUDE_xTaskGetCurrentTaskHandle) || (INCLUDE_xTaskGetCurrentTaskHandle != 1)
+#error "ESPEventBus requires INCLUDE_xTaskGetCurrentTaskHandle set to 1"
+#endif
+
 EventBus::EventBus() = default;
 
 EventBus::~EventBus() {
@@ -13,16 +17,24 @@ bool EventBus::init(const EventBusConfig& config) {
         deinit();
     }
 
-    if (config.queueLength == 0 || config.taskStackWords == 0) {
+    EventBusConfig sanitized = config;
+    if (sanitized.queueLength == 0 || sanitized.taskStackWords == 0) {
         return false;
     }
+
+    if (sanitized.pressureThresholdPercent > 100) {
+        sanitized.pressureThresholdPercent = 100;
+    }
+
+    config_ = sanitized;
+    stopEventPending_ = false;
 
     subMutex_ = xSemaphoreCreateMutex();
     if (!subMutex_) {
         return false;
     }
 
-    queue_ = xQueueCreate(config.queueLength, sizeof(QueuedEvent));
+    queue_ = xQueueCreate(config_.queueLength, sizeof(QueuedEvent));
     if (!queue_) {
         vSemaphoreDelete(subMutex_);
         subMutex_ = nullptr;
@@ -30,15 +42,15 @@ bool EventBus::init(const EventBusConfig& config) {
     }
 
     running_ = true;
-    const char* taskName = (config.taskName && config.taskName[0] != '\0') ? config.taskName : "EventBus";
+    const char* taskName = (config_.taskName && config_.taskName[0] != '\0') ? config_.taskName : "EventBus";
     BaseType_t res = xTaskCreatePinnedToCore(
         &EventBus::taskEntry,
         taskName,
-        config.taskStackWords,
+        config_.taskStackWords,
         this,
-        config.taskPriority,
+        config_.taskPriority,
         &task_,
-        config.coreId);
+        config_.coreId);
 
     if (res != pdPASS) {
         running_ = false;
@@ -67,6 +79,8 @@ void EventBus::deinit() {
 
     subs_.clear();
     nextSubId_ = 0;
+    stopEventPending_ = false;
+    config_ = EventBusConfig{};
 }
 
 bool EventBus::post(EventBusId id, void* payload, TickType_t timeout) {
@@ -74,8 +88,12 @@ bool EventBus::post(EventBusId id, void* payload, TickType_t timeout) {
         return false;
     }
 
+    if (!validatePayload(id, payload)) {
+        return false;
+    }
+
     QueuedEvent ev{ id, payload, false };
-    return xQueueSend(queue_, &ev, timeout) == pdTRUE;
+    return enqueueFromTask(ev, timeout);
 }
 
 bool EventBus::postFromISR(EventBusId id, void* payload, BaseType_t* higherPriorityTaskWoken) {
@@ -83,19 +101,12 @@ bool EventBus::postFromISR(EventBusId id, void* payload, BaseType_t* higherPrior
         return false;
     }
 
-    QueuedEvent ev{ id, payload, false };
-    BaseType_t localWoken = pdFALSE;
-    BaseType_t res = xQueueSendFromISR(queue_, &ev, &localWoken);
-
-    if (higherPriorityTaskWoken) {
-        *higherPriorityTaskWoken = localWoken;
-    } else if (localWoken == pdTRUE) {
-#if defined(portYIELD_FROM_ISR)
-        portYIELD_FROM_ISR();
-#endif
+    if (!validatePayload(id, payload)) {
+        return false;
     }
 
-    return res == pdTRUE;
+    QueuedEvent ev{ id, payload, false };
+    return enqueueFromISR(ev, higherPriorityTaskWoken);
 }
 
 EventBusSub EventBus::subscribe(EventBusId id,
@@ -108,6 +119,14 @@ EventBusSub EventBus::subscribe(EventBusId id,
 
     if (xSemaphoreTake(subMutex_, portMAX_DELAY) != pdTRUE) {
         return 0;
+    }
+
+    if (config_.maxSubscriptions != 0) {
+        size_t activeCount = std::count_if(subs_.begin(), subs_.end(), [](const Subscription& sub) { return sub.active; });
+        if (activeCount >= config_.maxSubscriptions) {
+            xSemaphoreGive(subMutex_);
+            return 0;
+        }
     }
 
     EventBusSub subId = ++nextSubId_;
@@ -141,11 +160,9 @@ void* EventBus::waitFor(EventBusId id, TickType_t timeout) {
         return nullptr;
     }
 
-#if defined(INCLUDE_xTaskGetCurrentTaskHandle) && (INCLUDE_xTaskGetCurrentTaskHandle == 1)
     if (task_ && xTaskGetCurrentTaskHandle() == task_) {
         return nullptr;
     }
-#endif
 
     QueueHandle_t responseQueue = xQueueCreate(1, sizeof(void*));
     if (!responseQueue) {
@@ -177,6 +194,8 @@ void EventBus::taskEntry(void* arg) {
 
 void EventBus::taskLoop() {
     if (!queue_) {
+        running_ = false;
+        stopEventPending_ = false;
         task_ = nullptr;
         vTaskDelete(nullptr);
         return;
@@ -193,6 +212,7 @@ void EventBus::taskLoop() {
         }
 
         if (ev.stop) {
+            stopEventPending_ = false;
             break;
         }
 
@@ -237,6 +257,7 @@ void EventBus::taskLoop() {
 void EventBus::stopTask() {
     if (!task_) {
         running_ = false;
+        stopEventPending_ = false;
         return;
     }
 
@@ -249,14 +270,17 @@ void EventBus::stopTask() {
         vTaskDelete(task_);
         task_ = nullptr;
         running_ = false;
+        stopEventPending_ = false;
         return;
     }
 
-    running_ = false;
-    if (queue_) {
+    if (queue_ && !stopEventPending_) {
         QueuedEvent stopEvent{};
         stopEvent.stop = true;
-        xQueueSend(queue_, &stopEvent, portMAX_DELAY);
+        while (xQueueSend(queue_, &stopEvent, pdMS_TO_TICKS(10)) != pdPASS) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+        stopEventPending_ = true;
     }
 
     while (task_) {
@@ -277,4 +301,141 @@ void EventBus::waiterCallback(void* payload, void* userArg) {
         return;
     }
     (void)xQueueSend(queue, &payload, 0);
+}
+
+bool EventBus::enqueueFromTask(const QueuedEvent& ev, TickType_t timeout) {
+    TickType_t waitTicks = timeout;
+    if (config_.overflowPolicy != EventBusOverflowPolicy::Block) {
+        waitTicks = 0;
+    }
+
+    if (xQueueSend(queue_, &ev, waitTicks) == pdTRUE) {
+        emitPressureMetricFromTask();
+        return true;
+    }
+
+    if (config_.overflowPolicy == EventBusOverflowPolicy::Block) {
+        notifyDrop(ev.eventId, ev.payload);
+        return false;
+    }
+
+    return handleOverflowFromTask(ev);
+}
+
+bool EventBus::enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityTaskWoken) {
+    BaseType_t localWoken = pdFALSE;
+    BaseType_t res = xQueueSendFromISR(queue_, &ev, &localWoken);
+    if (res == pdPASS) {
+        propagateYieldFromISR(localWoken, higherPriorityTaskWoken);
+        return true;
+    }
+
+    if (config_.overflowPolicy == EventBusOverflowPolicy::Block) {
+        notifyDrop(ev.eventId, ev.payload);
+        propagateYieldFromISR(localWoken, higherPriorityTaskWoken);
+        return false;
+    }
+
+    bool ok = handleOverflowFromISR(ev, &localWoken);
+    propagateYieldFromISR(localWoken, higherPriorityTaskWoken);
+    return ok;
+}
+
+bool EventBus::handleOverflowFromTask(const QueuedEvent& ev) {
+    switch (config_.overflowPolicy) {
+        case EventBusOverflowPolicy::DropNewest:
+            notifyDrop(ev.eventId, ev.payload);
+            return false;
+        case EventBusOverflowPolicy::DropOldest: {
+            QueuedEvent dropped{};
+            if (xQueueReceive(queue_, &dropped, 0) == pdTRUE) {
+                notifyDrop(dropped.eventId, dropped.payload);
+                if (xQueueSend(queue_, &ev, 0) == pdTRUE) {
+                    emitPressureMetricFromTask();
+                    return true;
+                }
+            }
+            notifyDrop(ev.eventId, ev.payload);
+            return false;
+        }
+        case EventBusOverflowPolicy::Block:
+        default:
+            notifyDrop(ev.eventId, ev.payload);
+            return false;
+    }
+}
+
+bool EventBus::handleOverflowFromISR(const QueuedEvent& ev, BaseType_t* localWokenAggregate) {
+    switch (config_.overflowPolicy) {
+        case EventBusOverflowPolicy::DropNewest:
+            notifyDrop(ev.eventId, ev.payload);
+            return false;
+        case EventBusOverflowPolicy::DropOldest: {
+            QueuedEvent dropped{};
+            BaseType_t localWoken = pdFALSE;
+            if (xQueueReceiveFromISR(queue_, &dropped, &localWoken) == pdTRUE) {
+                if (localWokenAggregate) {
+                    if (localWoken == pdTRUE) {
+                        *localWokenAggregate = pdTRUE;
+                    }
+                }
+                notifyDrop(dropped.eventId, dropped.payload);
+                BaseType_t sendWoken = pdFALSE;
+                if (xQueueSendFromISR(queue_, &ev, &sendWoken) == pdPASS) {
+                    if (sendWoken == pdTRUE) {
+                        localWoken = pdTRUE;
+                    }
+                    if (localWokenAggregate) {
+                        if (localWoken == pdTRUE || sendWoken == pdTRUE) {
+                            *localWokenAggregate = pdTRUE;
+                        }
+                    }
+                    return true;
+                }
+            }
+            notifyDrop(ev.eventId, ev.payload);
+            return false;
+        }
+        case EventBusOverflowPolicy::Block:
+        default:
+            notifyDrop(ev.eventId, ev.payload);
+            return false;
+    }
+}
+
+void EventBus::emitPressureMetricFromTask() {
+    if (!config_.pressureCallback || !queue_ || config_.queueLength == 0 || config_.pressureThresholdPercent == 0) {
+        return;
+    }
+
+    UBaseType_t queued = uxQueueMessagesWaiting(queue_);
+    uint32_t percent = (queued * 100U) / config_.queueLength;
+    if (percent >= config_.pressureThresholdPercent) {
+        config_.pressureCallback(queued, config_.queueLength, config_.pressureUserArg);
+    }
+}
+
+void EventBus::notifyDrop(EventBusId id, void* payload) {
+    if (config_.dropCallback) {
+        config_.dropCallback(id, payload, config_.dropUserArg);
+    }
+}
+
+bool EventBus::validatePayload(EventBusId id, void* payload) const {
+    if (!config_.payloadValidator) {
+        return true;
+    }
+    return config_.payloadValidator(id, payload, config_.payloadValidatorArg);
+}
+
+void EventBus::propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken) {
+    if (higherPriorityTaskWoken) {
+        if (localWoken == pdTRUE) {
+            *higherPriorityTaskWoken = pdTRUE;
+        }
+    } else if (localWoken == pdTRUE) {
+#if defined(portYIELD_FROM_ISR)
+        portYIELD_FROM_ISR();
+#endif
+    }
 }

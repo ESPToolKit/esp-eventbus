@@ -105,9 +105,57 @@ if (payload) {
 - `void* waitFor(Id id, TickType_t timeout = portMAX_DELAY)`  
   Blocks the calling task using a temporary queue. Returns the payload pointer or `nullptr` on timeout.
 
-## Example
+### EventBus configuration & safety controls
 
-The `examples/basic_usage` sketch shows a minimal setup with two FreeRTOS tasks: one posting network events and one waiting for them via `waitFor`.
+`EventBusConfig` now includes extra fields so you can harden the bus when multiple components share it:
+
+```cpp
+enum class EventBusOverflowPolicy : uint8_t {
+    Block,       // Default — callers block (up to their timeout) when the queue is full
+    DropNewest,  // Drop the event that could not be queued
+    DropOldest,  // Evict the stalest queued event to make room for the new one
+};
+
+struct EventBusConfig {
+    uint16_t queueLength = 16;
+    UBaseType_t taskPriority = 5;
+    uint32_t taskStackWords = 4096;
+    BaseType_t coreId = tskNO_AFFINITY;
+    const char* taskName = "EventBus";
+    uint16_t maxSubscriptions = 0;             // 0 => unlimited subscriptions
+    EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
+    uint8_t pressureThresholdPercent = 90;     // Trigger pressure callback once the queue reaches this fill level (0 disables)
+    EventBusQueuePressureFn pressureCallback = nullptr;
+    void* pressureUserArg = nullptr;
+    EventBusDropFn dropCallback = nullptr;     // Called whenever a payload is dropped by the overflow policy
+    void* dropUserArg = nullptr;
+    EventBusPayloadValidatorFn payloadValidator = nullptr;
+    void* payloadValidatorArg = nullptr;
+};
+```
+
+- `maxSubscriptions` limits how many active subscriptions the bus will host. When the ceiling is reached `subscribe` returns `0` so a rogue task cannot exhaust heap. Leave it at `0` (the default) for the previous unlimited behaviour.
+- `overflowPolicy` defines the queue back-pressure behaviour. The default (`Block`) preserves the original semantics. `DropNewest` fails quickly and `DropOldest` discards stale events to keep the newest payload flowing. When an event is dropped the optional `dropCallback` fires with the offending ID/payload (again, in the context of the poster/ISR) so you can log or recycle memory.
+- `pressureCallback` provides basic instrumentation: whenever the queue fill percentage meets/exceeds `pressureThresholdPercent`, the callback is invoked with the queued and maximum depths. This runs in the context of the posting task (or ISR), so keep the callback short and ISR-safe if you post from interrupts. You can use it to slow noisy producers or collect metrics.
+- `payloadValidator` is invoked before every post (task or ISR) in the caller's context. It lets you enforce ownership rules globally — for example, ensure every payload pointer belongs to a shared pool. Returning `false` rejects the event immediately, so keep the validator ISR-safe if you emit events from interrupts.
+
+> ℹ️ `waitFor` now unconditionally checks that it is **not** running on the EventBus worker. Set `INCLUDE_xTaskGetCurrentTaskHandle=1` in your FreeRTOS config (this is enabled by default on ESP-IDF and Arduino) or the build will fail.
+
+## Examples
+
+- `examples/basic_usage` is a minimal two-task sketch showing posting and `waitFor`.
+- `examples/request_response` demonstrates using the bus for request/response interactions between tasks (`waitFor` + worker callbacks).
+- `examples/overflow_monitor` showcases payload validation, queue pressure instrumentation, and overflow policies in action.
+
+## Tests
+
+The repository ships with PlatformIO-based Unity tests that exercise overflow policies, subscription limits, payload validation, and shutdown behaviour. To run them on hardware:
+
+```bash
+pio test -e esp32dev
+```
+
+You can swap `esp32dev` with any ESP32 board definition you have connected.
 
 ## License
 
