@@ -2,10 +2,6 @@
 
 #include <algorithm>
 
-#if !defined(INCLUDE_xTaskGetCurrentTaskHandle) || (INCLUDE_xTaskGetCurrentTaskHandle != 1)
-#error "ESPEventBus requires INCLUDE_xTaskGetCurrentTaskHandle set to 1"
-#endif
-
 EventBus::EventBus() = default;
 
 EventBus::~EventBus() {
@@ -160,7 +156,7 @@ void* EventBus::waitFor(EventBusId id, TickType_t timeout) {
         return nullptr;
     }
 
-    if (task_ && xTaskGetCurrentTaskHandle() == task_) {
+    if (task_ && currentTaskHandle() == task_) {
         return nullptr;
     }
 
@@ -439,3 +435,14 @@ void EventBus::propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPr
 #endif
     }
 }
+
+#if defined(INCLUDE_xTaskGetCurrentTaskHandle) && (INCLUDE_xTaskGetCurrentTaskHandle == 1)
+TaskHandle_t EventBus::currentTaskHandle() {
+    return xTaskGetCurrentTaskHandle();
+}
+#else
+extern "C" void* volatile pxCurrentTCB;
+TaskHandle_t EventBus::currentTaskHandle() {
+    return reinterpret_cast<TaskHandle_t>(pxCurrentTCB);
+}
+#endif

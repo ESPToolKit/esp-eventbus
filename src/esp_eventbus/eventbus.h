@@ -117,6 +117,7 @@ class EventBus {
     void notifyDrop(EventBusId id, void* payload);
     bool validatePayload(EventBusId id, void* payload) const;
     void propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken);
+    static TaskHandle_t currentTaskHandle();
 
     QueueHandle_t queue_ = nullptr;
     TaskHandle_t task_ = nullptr;
