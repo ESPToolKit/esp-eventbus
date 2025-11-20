@@ -99,8 +99,8 @@ enum class EventBusOverflowPolicy : uint8_t {
 
 struct EventBusConfig {
     uint16_t queueLength = 16;
-    UBaseType_t taskPriority = 5;
-    uint32_t taskStackWords = 4096;
+    UBaseType_t priority = 5;
+    uint32_t stackSize = 4096 * sizeof(StackType_t);
     BaseType_t coreId = tskNO_AFFINITY;
     const char* taskName = "EventBus";
     uint16_t maxSubscriptions = 0;
@@ -110,6 +110,8 @@ struct EventBusConfig {
     EventBusDropFn dropCallback = nullptr;
     EventBusPayloadValidatorFn payloadValidator = nullptr;
 };
+
+Stack sizes are expressed in bytes.
 ```
 
 Combine `pressureCallback` and `dropCallback` to monitor noisy publishers, and wire `payloadValidator` to enforce shared ownership rules before any payload reaches the queue.

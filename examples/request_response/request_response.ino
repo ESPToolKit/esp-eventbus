@@ -57,8 +57,8 @@ void setup() {
 
     EventBusConfig cfg{};
     cfg.queueLength = 8;
-    cfg.taskPriority = 4;
-    cfg.taskStackWords = 4096;
+    cfg.priority = 4;
+    cfg.stackSize = 4096;
 
     if (!eventBus.init(cfg)) {
         Serial.println("Failed to init EventBus");

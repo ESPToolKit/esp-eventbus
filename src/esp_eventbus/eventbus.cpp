@@ -14,7 +14,7 @@ bool EventBus::init(const EventBusConfig& config) {
     }
 
     EventBusConfig sanitized = config;
-    if (sanitized.queueLength == 0 || sanitized.taskStackWords == 0) {
+    if (sanitized.queueLength == 0 || sanitized.stackSize == 0) {
         return false;
     }
 
@@ -42,9 +42,9 @@ bool EventBus::init(const EventBusConfig& config) {
     BaseType_t res = xTaskCreatePinnedToCore(
         &EventBus::taskEntry,
         taskName,
-        config_.taskStackWords,
+        config_.stackSize,
         this,
-        config_.taskPriority,
+        config_.priority,
         &task_,
         config_.coreId);
 
