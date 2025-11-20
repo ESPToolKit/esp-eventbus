@@ -16,7 +16,7 @@ struct ResponsePayload {
     String result;
 };
 
-EventBus eventBus;
+ESPEventBus eventBus;
 static ResponsePayload sharedResponse{};
 
 void workerCallback(void* payload, void*) {
@@ -61,7 +61,7 @@ void setup() {
     cfg.stackSize = 4096;
 
     if (!eventBus.init(cfg)) {
-        Serial.println("Failed to init EventBus");
+        Serial.println("Failed to init ESPEventBus");
         return;
     }
 

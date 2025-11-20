@@ -2,13 +2,13 @@
 
 #include <algorithm>
 
-EventBus::EventBus() = default;
+ESPEventBus::ESPEventBus() = default;
 
-EventBus::~EventBus() {
+ESPEventBus::~ESPEventBus() {
     deinit();
 }
 
-bool EventBus::init(const EventBusConfig& config) {
+bool ESPEventBus::init(const EventBusConfig& config) {
     if (queue_ || task_ || subMutex_) {
         deinit();
     }
@@ -38,9 +38,9 @@ bool EventBus::init(const EventBusConfig& config) {
     }
 
     running_ = true;
-    const char* taskName = (config_.taskName && config_.taskName[0] != '\0') ? config_.taskName : "EventBus";
+    const char* taskName = (config_.taskName && config_.taskName[0] != '\0') ? config_.taskName : "ESPEventBus";
     BaseType_t res = xTaskCreatePinnedToCore(
-        &EventBus::taskEntry,
+        &ESPEventBus::taskEntry,
         taskName,
         config_.stackSize,
         this,
@@ -60,7 +60,7 @@ bool EventBus::init(const EventBusConfig& config) {
     return true;
 }
 
-void EventBus::deinit() {
+void ESPEventBus::deinit() {
     stopTask();
 
     if (queue_) {
@@ -79,7 +79,7 @@ void EventBus::deinit() {
     config_ = EventBusConfig{};
 }
 
-bool EventBus::post(EventBusId id, void* payload, TickType_t timeout) {
+bool ESPEventBus::post(EventBusId id, void* payload, TickType_t timeout) {
     if (!queue_) {
         return false;
     }
@@ -92,7 +92,7 @@ bool EventBus::post(EventBusId id, void* payload, TickType_t timeout) {
     return enqueueFromTask(ev, timeout);
 }
 
-bool EventBus::postFromISR(EventBusId id, void* payload, BaseType_t* higherPriorityTaskWoken) {
+bool ESPEventBus::postFromISR(EventBusId id, void* payload, BaseType_t* higherPriorityTaskWoken) {
     if (!queue_) {
         return false;
     }
@@ -105,7 +105,7 @@ bool EventBus::postFromISR(EventBusId id, void* payload, BaseType_t* higherPrior
     return enqueueFromISR(ev, higherPriorityTaskWoken);
 }
 
-EventBusSub EventBus::subscribe(EventBusId id,
+EventBusSub ESPEventBus::subscribe(EventBusId id,
                                 EventCallbackFn cb,
                                 void* userArg,
                                 bool oneshot) {
@@ -131,7 +131,7 @@ EventBusSub EventBus::subscribe(EventBusId id,
     return subId;
 }
 
-void EventBus::unsubscribe(EventBusSub subId) {
+void ESPEventBus::unsubscribe(EventBusSub subId) {
     if (!subId || !subMutex_) {
         return;
     }
@@ -151,7 +151,7 @@ void EventBus::unsubscribe(EventBusSub subId) {
     xSemaphoreGive(subMutex_);
 }
 
-void* EventBus::waitFor(EventBusId id, TickType_t timeout) {
+void* ESPEventBus::waitFor(EventBusId id, TickType_t timeout) {
     if (!queue_) {
         return nullptr;
     }
@@ -165,7 +165,7 @@ void* EventBus::waitFor(EventBusId id, TickType_t timeout) {
         return nullptr;
     }
 
-    EventBusSub sid = subscribe(id, &EventBus::waiterCallback, responseQueue, true);
+    EventBusSub sid = subscribe(id, &ESPEventBus::waiterCallback, responseQueue, true);
     if (!sid) {
         vQueueDelete(responseQueue);
         return nullptr;
@@ -183,12 +183,12 @@ void* EventBus::waitFor(EventBusId id, TickType_t timeout) {
     return payload;
 }
 
-void EventBus::taskEntry(void* arg) {
-    auto* instance = static_cast<EventBus*>(arg);
+void ESPEventBus::taskEntry(void* arg) {
+    auto* instance = static_cast<ESPEventBus*>(arg);
     instance->taskLoop();
 }
 
-void EventBus::taskLoop() {
+void ESPEventBus::taskLoop() {
     if (!queue_) {
         running_ = false;
         stopEventPending_ = false;
@@ -250,7 +250,7 @@ void EventBus::taskLoop() {
     vTaskDelete(nullptr);
 }
 
-void EventBus::stopTask() {
+void ESPEventBus::stopTask() {
     if (!task_) {
         running_ = false;
         stopEventPending_ = false;
@@ -284,14 +284,14 @@ void EventBus::stopTask() {
     }
 }
 
-void EventBus::compactSubscriptionsLocked() {
+void ESPEventBus::compactSubscriptionsLocked() {
     subs_.erase(
         std::remove_if(subs_.begin(), subs_.end(),
                        [](const Subscription& sub) { return !sub.active; }),
         subs_.end());
 }
 
-void EventBus::waiterCallback(void* payload, void* userArg) {
+void ESPEventBus::waiterCallback(void* payload, void* userArg) {
     QueueHandle_t queue = reinterpret_cast<QueueHandle_t>(userArg);
     if (!queue) {
         return;
@@ -299,7 +299,7 @@ void EventBus::waiterCallback(void* payload, void* userArg) {
     (void)xQueueSend(queue, &payload, 0);
 }
 
-bool EventBus::enqueueFromTask(const QueuedEvent& ev, TickType_t timeout) {
+bool ESPEventBus::enqueueFromTask(const QueuedEvent& ev, TickType_t timeout) {
     TickType_t waitTicks = timeout;
     if (config_.overflowPolicy != EventBusOverflowPolicy::Block) {
         waitTicks = 0;
@@ -318,7 +318,7 @@ bool EventBus::enqueueFromTask(const QueuedEvent& ev, TickType_t timeout) {
     return handleOverflowFromTask(ev);
 }
 
-bool EventBus::enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityTaskWoken) {
+bool ESPEventBus::enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityTaskWoken) {
     BaseType_t localWoken = pdFALSE;
     BaseType_t res = xQueueSendFromISR(queue_, &ev, &localWoken);
     if (res == pdPASS) {
@@ -337,7 +337,7 @@ bool EventBus::enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityT
     return ok;
 }
 
-bool EventBus::handleOverflowFromTask(const QueuedEvent& ev) {
+bool ESPEventBus::handleOverflowFromTask(const QueuedEvent& ev) {
     switch (config_.overflowPolicy) {
         case EventBusOverflowPolicy::DropNewest:
             notifyDrop(ev.eventId, ev.payload);
@@ -361,7 +361,7 @@ bool EventBus::handleOverflowFromTask(const QueuedEvent& ev) {
     }
 }
 
-bool EventBus::handleOverflowFromISR(const QueuedEvent& ev, BaseType_t* localWokenAggregate) {
+bool ESPEventBus::handleOverflowFromISR(const QueuedEvent& ev, BaseType_t* localWokenAggregate) {
     switch (config_.overflowPolicy) {
         case EventBusOverflowPolicy::DropNewest:
             notifyDrop(ev.eventId, ev.payload);
@@ -399,7 +399,7 @@ bool EventBus::handleOverflowFromISR(const QueuedEvent& ev, BaseType_t* localWok
     }
 }
 
-void EventBus::emitPressureMetricFromTask() {
+void ESPEventBus::emitPressureMetricFromTask() {
     if (!config_.pressureCallback || !queue_ || config_.queueLength == 0 || config_.pressureThresholdPercent == 0) {
         return;
     }
@@ -411,20 +411,20 @@ void EventBus::emitPressureMetricFromTask() {
     }
 }
 
-void EventBus::notifyDrop(EventBusId id, void* payload) {
+void ESPEventBus::notifyDrop(EventBusId id, void* payload) {
     if (config_.dropCallback) {
         config_.dropCallback(id, payload, config_.dropUserArg);
     }
 }
 
-bool EventBus::validatePayload(EventBusId id, void* payload) const {
+bool ESPEventBus::validatePayload(EventBusId id, void* payload) const {
     if (!config_.payloadValidator) {
         return true;
     }
     return config_.payloadValidator(id, payload, config_.payloadValidatorArg);
 }
 
-void EventBus::propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken) {
+void ESPEventBus::propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken) {
     if (higherPriorityTaskWoken) {
         if (localWoken == pdTRUE) {
             *higherPriorityTaskWoken = pdTRUE;
@@ -437,12 +437,12 @@ void EventBus::propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPr
 }
 
 #if defined(INCLUDE_xTaskGetCurrentTaskHandle) && (INCLUDE_xTaskGetCurrentTaskHandle == 1)
-TaskHandle_t EventBus::currentTaskHandle() {
+TaskHandle_t ESPEventBus::currentTaskHandle() {
     return xTaskGetCurrentTaskHandle();
 }
 #else
 extern "C" void* volatile pxCurrentTCB;
-TaskHandle_t EventBus::currentTaskHandle() {
+TaskHandle_t ESPEventBus::currentTaskHandle() {
     return reinterpret_cast<TaskHandle_t>(pxCurrentTCB);
 }
 #endif

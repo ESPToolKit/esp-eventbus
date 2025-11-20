@@ -29,7 +29,7 @@ struct EventBusConfig {
     UBaseType_t priority = 5;
     uint32_t stackSize = 4096 * sizeof(StackType_t);
     BaseType_t coreId = tskNO_AFFINITY;
-    const char* taskName = "EventBus";
+    const char* taskName = "ESPEventBus";
     uint16_t maxSubscriptions = 0;  // 0 => unlimited
     EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
     uint8_t pressureThresholdPercent = 90;  // Percentage (1-100) before invoking pressure callback
@@ -41,13 +41,13 @@ struct EventBusConfig {
     void* payloadValidatorArg = nullptr;
 };
 
-class EventBus {
+class ESPEventBus {
   public:
-    EventBus();
-    ~EventBus();
+    ESPEventBus();
+    ~ESPEventBus();
 
-    EventBus(const EventBus&) = delete;
-    EventBus& operator=(const EventBus&) = delete;
+    ESPEventBus(const ESPEventBus&) = delete;
+    ESPEventBus& operator=(const ESPEventBus&) = delete;
 
     bool init(const EventBusConfig& config = EventBusConfig{});
     void deinit();

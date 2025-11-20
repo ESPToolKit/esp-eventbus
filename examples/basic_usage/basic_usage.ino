@@ -10,7 +10,7 @@ struct NetworkGotIpPayload {
     char address[16];
 };
 
-EventBus eventBus;
+ESPEventBus eventBus;
 
 void networkSimulatorTask(void* pv) {
     static NetworkGotIpPayload payload{};
@@ -45,7 +45,7 @@ void setup() {
     }
 
     if (!eventBus.init()) {
-        Serial.println("Failed to init EventBus");
+        Serial.println("Failed to init ESPEventBus");
         return;
     }
 

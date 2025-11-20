@@ -67,7 +67,7 @@ static bool poolValidator(EventBusId, void* payload, void* userArg) {
 }
 
 struct ProducerContext {
-    EventBus* bus = nullptr;
+    ESPEventBus* bus = nullptr;
     TestPayload payload{};
     volatile bool stop = false;
     TaskHandle_t handle = nullptr;
@@ -86,7 +86,7 @@ static void producerTask(void* arg) {
 }
 
 void test_subscription_cap_limits_handles() {
-    EventBus bus;
+    ESPEventBus bus;
     EventBusConfig cfg{};
     cfg.maxSubscriptions = 2;
     TEST_ASSERT_TRUE(bus.init(cfg));
@@ -103,7 +103,7 @@ void test_subscription_cap_limits_handles() {
 }
 
 void test_payload_validator_rejects_unknown_payloads() {
-    EventBus bus;
+    ESPEventBus bus;
     TestPayload pool[2]{};
     PoolContext ctx{ pool, 2 };
 
@@ -121,7 +121,7 @@ void test_payload_validator_rejects_unknown_payloads() {
 }
 
 void test_drop_oldest_policy_discards_backlog() {
-    EventBus bus;
+    ESPEventBus bus;
     DropContext ctx{};
     TestPayload scratch[8]{};
 
@@ -145,7 +145,7 @@ void test_drop_oldest_policy_discards_backlog() {
 }
 
 void test_drop_newest_policy_discards_incoming_event() {
-    EventBus bus;
+    ESPEventBus bus;
     DropContext ctx{};
     TestPayload scratch[6]{};
 
@@ -169,7 +169,7 @@ void test_drop_newest_policy_discards_incoming_event() {
 }
 
 void test_pressure_callback_triggers_on_high_usage() {
-    EventBus bus;
+    ESPEventBus bus;
     DropContext dropCtx{};
     PressureContext pressureCtx{};
 
@@ -197,7 +197,7 @@ void test_pressure_callback_triggers_on_high_usage() {
 }
 
 void test_deinit_completes_when_queue_is_busy() {
-    EventBus bus;
+    ESPEventBus bus;
     DropContext ctx{};
 
     EventBusConfig cfg{};

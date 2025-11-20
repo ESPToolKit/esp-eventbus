@@ -40,14 +40,14 @@ struct NetworkGotIpPayload {
     String ip;
 };
 
-EventBus eventBus;
+ESPEventBus eventBus;
 
 void setup() {
     eventBus.init();
 
     eventBus.subscribe(AppEvent::NetworkGotIP, [](void* payload, void*) {
         auto* info = static_cast<NetworkGotIpPayload*>(payload);
-        Serial.printf("[EventBus] Network IP %s\n", info->ip.c_str());
+        Serial.printf("[ESPEventBus] Network IP %s\n", info->ip.c_str());
     });
 }
 
@@ -77,7 +77,7 @@ Explore the sketches under `examples/`:
 
 ## Gotchas
 - The bus only stores the pointer you supply; keep payloads alive for as long as subscribers need them or use pools/ref-counted buffers.
-- `waitFor` refuses to run on the EventBus worker task. Enable `INCLUDE_xTaskGetCurrentTaskHandle=1` (set by default on ESP-IDF/Arduino) so the guard can detect misuse.
+- `waitFor` refuses to run on the ESPEventBus worker task. Enable `INCLUDE_xTaskGetCurrentTaskHandle=1` (set by default on ESP-IDF/Arduino) so the guard can detect misuse.
 - `postFromISR` behaves like `post` but still runs callbacks on the worker. Long callbacks block the worker and delay other subscribers.
 - Overflow policies that drop events fire user callbacks in the posting context—keep those callbacks short and ISR-safe where applicable.
 
@@ -102,7 +102,7 @@ struct EventBusConfig {
     UBaseType_t priority = 5;
     uint32_t stackSize = 4096 * sizeof(StackType_t);
     BaseType_t coreId = tskNO_AFFINITY;
-    const char* taskName = "EventBus";
+    const char* taskName = "ESPEventBus";
     uint16_t maxSubscriptions = 0;
     EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
     uint8_t pressureThresholdPercent = 90;
@@ -119,7 +119,7 @@ Combine `pressureCallback` and `dropCallback` to monitor noisy publishers, and w
 ## Restrictions
 - Built and tested on ESP32 (Arduino-ESP32 and ESP-IDF) with FreeRTOS available; other MCUs/frameworks are unsupported.
 - Requires C++17 support and a FreeRTOS configuration that enables `xTaskGetCurrentTaskHandle` (Arduino + ESP-IDF do this by default).
-- Single EventBus instance manages its own worker task; if you construct multiple buses they each allocate their own queue/task resources.
+- Single ESPEventBus instance manages its own worker task; if you construct multiple buses they each allocate their own queue/task resources.
 
 ## Tests
 Unity tests run under PlatformIO: plug in an ESP32 dev board and execute `pio test -e esp32dev` from the repo root. The suite covers overflow policies, subscription caps, payload validation, and graceful shutdown.

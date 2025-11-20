@@ -10,7 +10,7 @@ struct SensorPayload {
     float reading;
 };
 
-EventBus eventBus;
+ESPEventBus eventBus;
 static SensorPayload pool[4];
 static size_t nextSlot = 0;
 
@@ -32,16 +32,16 @@ bool payloadValidator(EventBusId, void* payload, void* userArg) {
 }
 
 void pressureCallback(UBaseType_t queued, UBaseType_t capacity, void*) {
-    Serial.printf("[EventBus] queue pressure: %u/%u entries in use\n", queued, capacity);
+    Serial.printf("[ESPEventBus] queue pressure: %u/%u entries in use\n", queued, capacity);
 }
 
 void dropCallback(EventBusId id, void*, void*) {
-    Serial.printf("[EventBus] dropped payload for event %u (queue stayed full)\n", static_cast<unsigned>(id));
+    Serial.printf("[ESPEventBus] dropped payload for event %u (queue stayed full)\n", static_cast<unsigned>(id));
 }
 
 void sensorConsumer(void* payload, void*) {
     auto* info = static_cast<SensorPayload*>(payload);
-    Serial.printf("[EventBus] seq=%u reading=%.3f\n", info->sequence, info->reading);
+    Serial.printf("[ESPEventBus] seq=%u reading=%.3f\n", info->sequence, info->reading);
     vTaskDelay(pdMS_TO_TICKS(80));  // Pretend to do slow work so we can exercise pressure/drop callbacks
 }
 
@@ -61,7 +61,7 @@ void setup() {
     cfg.payloadValidatorArg = &poolCtx;
 
     if (!eventBus.init(cfg)) {
-        Serial.println("Failed to init EventBus");
+        Serial.println("Failed to init ESPEventBus");
         return;
     }
 
@@ -74,7 +74,7 @@ void loop() {
     slot.reading = analogReadMilliVolts(34) / 1000.0f;
 
     if (!eventBus.post(SensorEvent::Sample, &slot, 0)) {
-        Serial.println("[EventBus] queue is saturated; payload rejected");
+        Serial.println("[ESPEventBus] queue is saturated; payload rejected");
     }
 
     nextSlot = (nextSlot + 1) % (sizeof(pool) / sizeof(pool[0]));
