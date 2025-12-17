@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <utility>
 #include <vector>
 
 #include "freertos/FreeRTOS.h"
@@ -13,6 +15,7 @@ using EventBusId = uint16_t;
 using EventBusSub = uint32_t;
 
 using EventCallbackFn = void (*)(void* payload, void* userArg);
+using EventCallback = std::function<void(void* payload, void* userArg)>;
 
 enum class EventBusOverflowPolicy : uint8_t {
     Block,
@@ -71,12 +74,25 @@ class ESPEventBus {
                           void* userArg = nullptr,
                           bool oneshot = false);
 
+    EventBusSub subscribe(EventBusId id,
+                          EventCallback cb,
+                          void* userArg = nullptr,
+                          bool oneshot = false);
+
     template <typename Id>
     EventBusSub subscribe(Id id,
                           EventCallbackFn cb,
                           void* userArg = nullptr,
                           bool oneshot = false) {
         return subscribe(static_cast<EventBusId>(id), cb, userArg, oneshot);
+    }
+
+    template <typename Id>
+    EventBusSub subscribe(Id id,
+                          EventCallback cb,
+                          void* userArg = nullptr,
+                          bool oneshot = false) {
+        return subscribe(static_cast<EventBusId>(id), std::move(cb), userArg, oneshot);
     }
 
     void unsubscribe(EventBusSub subId);
@@ -92,7 +108,7 @@ class ESPEventBus {
     struct Subscription {
         EventBusSub subId = 0;
         EventBusId eventId = 0;
-        EventCallbackFn cb = nullptr;
+        EventCallback cb;
         void* userArg = nullptr;
         bool oneshot = false;
         bool active = false;

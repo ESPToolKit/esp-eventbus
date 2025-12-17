@@ -3,7 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- No changes yet.
+### Added
+- Added `std::function` subscription overloads so callers can bind member methods or use capturing lambdas.
 
 ## [1.0.0] - 2025-11-19
 ### Added

@@ -12,6 +12,7 @@ An asynchronous, FreeRTOS-native event bus for ESP32 projects. Producers post pa
 - Dedicated FreeRTOS worker task with configurable queue depth, stack size, priority, and core affinity.
 - Thread-safe and ISR-safe posting (ISRs can queue events without waking the worker unless needed).
 - Unlimited subscriptions per event with optional user data and one-shot semantics.
+- `std::function` callback support so you can bind private member methods or use capturing lambdas.
 - Per-task `waitFor` helper implemented with short-lived queues so any task can await the next payload.
 - Queue overflow policies, pressure callbacks, and payload validation hooks for defensive firmware.
 
@@ -59,6 +60,16 @@ void loop() {
 }
 ```
 
+Bind private class methods with `std::bind` when needed:
+
+```cpp
+eventBus.subscribe(AppEvent::NetworkGotIP,
+                   std::bind(&HostedFirmwareUpdater::onNetEvent,
+                             this,
+                             std::placeholders::_1,
+                             std::placeholders::_2));
+```
+
 Need to suspend the caller until a payload arrives? `waitFor` creates a one-shot subscription and blocks on a temporary queue:
 
 ```cpp
@@ -84,7 +95,8 @@ Explore the sketches under `examples/`:
 ## API Reference
 - `bool init(const EventBusConfig& cfg = EventBusConfig{})` – creates the subscription mutex, queue, and worker task.
 - `bool post(Id id, void* payload, TickType_t timeout = 0)` / `bool postFromISR(...)` – queue an event from tasks or interrupts.
-- `EventBusSub subscribe(Id id, EventCallbackFn cb, void* userArg = nullptr, bool oneshot = false)` – register callbacks; returns `0` on failure.
+- `EventBusSub subscribe(Id id, EventCallbackFn cb, void* userArg = nullptr, bool oneshot = false)` – register C-style callbacks; returns `0` on failure.
+- `EventBusSub subscribe(Id id, EventCallback cb, void* userArg = nullptr, bool oneshot = false)` – register `std::function` callbacks (bind/captures).
 - `void unsubscribe(EventBusSub subId)` – deactivate one subscription.
 - `void* waitFor(Id id, TickType_t timeout = portMAX_DELAY)` – block the caller on a temporary queue and return the payload pointer or `nullptr` on timeout.
 

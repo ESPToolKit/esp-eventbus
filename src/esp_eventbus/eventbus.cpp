@@ -106,9 +106,20 @@ bool ESPEventBus::postFromISR(EventBusId id, void* payload, BaseType_t* higherPr
 }
 
 EventBusSub ESPEventBus::subscribe(EventBusId id,
-                                EventCallbackFn cb,
-                                void* userArg,
-                                bool oneshot) {
+                                   EventCallbackFn cb,
+                                   void* userArg,
+                                   bool oneshot) {
+    if (!cb) {
+        return 0;
+    }
+
+    return subscribe(id, EventCallback(cb), userArg, oneshot);
+}
+
+EventBusSub ESPEventBus::subscribe(EventBusId id,
+                                   EventCallback cb,
+                                   void* userArg,
+                                   bool oneshot) {
     if (!cb || !subMutex_) {
         return 0;
     }
@@ -126,7 +137,7 @@ EventBusSub ESPEventBus::subscribe(EventBusId id,
     }
 
     EventBusSub subId = ++nextSubId_;
-    subs_.push_back(Subscription{ subId, id, cb, userArg, oneshot, true });
+    subs_.push_back(Subscription{ subId, id, std::move(cb), userArg, oneshot, true });
     xSemaphoreGive(subMutex_);
     return subId;
 }
