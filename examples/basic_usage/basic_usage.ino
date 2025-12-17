@@ -12,6 +12,11 @@ struct NetworkGotIpPayload {
 
 ESPEventBus eventBus;
 
+void onNetworkGotIp(void* payload, void*) {
+    auto* info = static_cast<NetworkGotIpPayload*>(payload);
+    Serial.printf("[callback] seq=%u ip=%s\n", info->sequence, info->address);
+}
+
 void networkSimulatorTask(void* pv) {
     static NetworkGotIpPayload payload{};
     uint8_t octet = 100;
@@ -49,10 +54,7 @@ void setup() {
         return;
     }
 
-    eventBus.subscribe(DemoEvent::NetworkGotIP, [](void* payload, void*) {
-        auto* info = static_cast<NetworkGotIpPayload*>(payload);
-        Serial.printf("[callback] seq=%u ip=%s\n", info->sequence, info->address);
-    });
+    eventBus.subscribe(DemoEvent::NetworkGotIP, onNetworkGotIp);
 
     xTaskCreatePinnedToCore(networkSimulatorTask, "network-sim", 2048, nullptr, 4, nullptr, 0);
     xTaskCreatePinnedToCore(blockingConsumerTask, "network-wait", 2048, nullptr, 4, nullptr, 1);

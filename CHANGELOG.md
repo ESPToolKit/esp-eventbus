@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Added `std::function` subscription overloads so callers can bind member methods or use capturing lambdas.
 
+### Fixed
+- Disambiguated the README and `examples/basic_usage` subscription callback to avoid overload ambiguity on Arduino.
+
 ## [1.0.0] - 2025-11-19
 ### Added
 - FreeRTOS-backed `ESPEventBus` with async posting, ISR-safe APIs, subscription management, and blocking `waitFor` helpers.

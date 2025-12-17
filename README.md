@@ -43,13 +43,15 @@ struct NetworkGotIpPayload {
 
 ESPEventBus eventBus;
 
+void onNetworkGotIp(void* payload, void*) {
+    auto* info = static_cast<NetworkGotIpPayload*>(payload);
+    Serial.printf("[ESPEventBus] Network IP %s\n", info->ip.c_str());
+}
+
 void setup() {
     eventBus.init();
 
-    eventBus.subscribe(AppEvent::NetworkGotIP, [](void* payload, void*) {
-        auto* info = static_cast<NetworkGotIpPayload*>(payload);
-        Serial.printf("[ESPEventBus] Network IP %s\n", info->ip.c_str());
-    });
+    eventBus.subscribe(AppEvent::NetworkGotIP, onNetworkGotIp);
 }
 
 void loop() {
