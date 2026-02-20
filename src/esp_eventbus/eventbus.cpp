@@ -535,8 +535,9 @@ bool ESPEventBus::createWorkerTask(const char* taskName) {
     taskConfig.priority = config_.priority;
     taskConfig.coreId = config_.coreId;
     taskConfig.name = (taskName && taskName[0] != '\0') ? taskName : "ESPEventBus";
-    WorkerResult result = config_.usePSRAMBuffers ? worker_.spawnExt([this]() { taskLoop(); }, taskConfig)
-                                                  : worker_.spawn([this]() { taskLoop(); }, taskConfig);
+    // Keep the event-bus worker task on the default FreeRTOS allocation path.
+    // Some ESP32 ports assert on caps/static task creation for TCB memory.
+    WorkerResult result = worker_.spawn([this]() { taskLoop(); }, taskConfig);
     if (!result) {
         workerTask_.reset();
         task_ = nullptr;

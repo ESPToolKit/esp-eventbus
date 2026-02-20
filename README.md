@@ -15,7 +15,7 @@ An asynchronous, FreeRTOS-native event bus for ESP32 projects. Producers post pa
 - `std::function` callback support so you can bind private member methods or use capturing lambdas.
 - Per-task `waitFor` helper implemented with short-lived queues so any task can await the next payload.
 - Queue overflow policies, pressure callbacks, and payload validation hooks for defensive firmware.
-- Optional `usePSRAMBuffers` toggle to route subscription/fan-out buffers and (when static FreeRTOS allocation is enabled) queue/task/mutex storage through `ESPBufferManager` with safe fallback.
+- Optional `usePSRAMBuffers` toggle to route subscription/fan-out buffers and (when static FreeRTOS allocation is enabled) queue/mutex storage through `ESPBufferManager` with safe fallback.
 
 ## Examples
 Define strongly typed event IDs (the bus only needs integral IDs internally):
@@ -129,7 +129,7 @@ struct EventBusConfig {
 
 Stack sizes are expressed in bytes.
 
-When `usePSRAMBuffers` is enabled, ESPEventBus routes its dynamic subscription/fan-out containers through `ESPBufferManager`. On builds where `configSUPPORT_STATIC_ALLOCATION == 1`, it also prefers PSRAM-backed static storage for the worker task stack/control block, event queue storage/control block, and synchronization objects. If PSRAM (or static allocation support) is unavailable, ESPEventBus falls back automatically to normal FreeRTOS heap-backed creation paths.
+When `usePSRAMBuffers` is enabled, ESPEventBus routes its dynamic subscription/fan-out containers through `ESPBufferManager`. On builds where `configSUPPORT_STATIC_ALLOCATION == 1`, it also prefers PSRAM-backed static storage for the event queue storage/control block and synchronization objects. The worker task is created through the standard `ESPWorker::spawn(...)` path for broad ESP32 compatibility. If PSRAM (or static allocation support) is unavailable, ESPEventBus falls back automatically to normal FreeRTOS heap-backed creation paths.
 ```
 
 Combine `pressureCallback` and `dropCallback` to monitor noisy publishers, and wire `payloadValidator` to enforce shared ownership rules before any payload reaches the queue.
