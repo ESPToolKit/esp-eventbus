@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "eventbus_allocator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -34,6 +35,7 @@ struct EventBusConfig {
     BaseType_t coreId = tskNO_AFFINITY;
     const char* taskName = "ESPEventBus";
     uint16_t maxSubscriptions = 0;  // 0 => unlimited
+    bool usePSRAMBuffers = false;
     EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
     uint8_t pressureThresholdPercent = 90;  // Percentage (1-100) before invoking pressure callback
     EventBusQueuePressureFn pressureCallback = nullptr;
@@ -134,13 +136,25 @@ class ESPEventBus {
     bool validatePayload(EventBusId id, void* payload) const;
     void propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken);
     static TaskHandle_t currentTaskHandle();
+    bool createKernelMutex();
+    bool createKernelQueue();
+    bool createWorkerTask(const char* taskName);
+    void resetKernelStorage();
+    static size_t taskStackWords(uint32_t stackSizeBytes);
+    static void* allocateKernelStorage(size_t bytes, bool usePSRAMBuffers);
+    static void freeKernelStorage(void* ptr);
 
     QueueHandle_t queue_ = nullptr;
     TaskHandle_t task_ = nullptr;
     SemaphoreHandle_t subMutex_ = nullptr;
-    std::vector<Subscription> subs_;
+    EventBusVector<Subscription> subs_;
     EventBusSub nextSubId_ = 0;
     EventBusConfig config_{};
     bool running_ = false;
     bool stopEventPending_ = false;
+    void* mutexStorage_ = nullptr;
+    void* queueStorage_ = nullptr;
+    void* queueControlStorage_ = nullptr;
+    void* taskStackStorage_ = nullptr;
+    void* taskControlStorage_ = nullptr;
 };

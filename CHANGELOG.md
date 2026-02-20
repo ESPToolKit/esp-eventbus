@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 ### Added
 - Added `std::function` subscription overloads so callers can bind member methods or use capturing lambdas.
+- Added `EventBusConfig::usePSRAMBuffers` and routed subscription/fan-out vectors through `ESPBufferManager` with automatic fallback when PSRAM is unavailable.
+- Added a platform-gated static FreeRTOS allocation path (`configSUPPORT_STATIC_ALLOCATION == 1`) so `usePSRAMBuffers` also covers worker queue/task/mutex storage via `ESPBufferManager`, with fallback to dynamic FreeRTOS allocation when unavailable.
 
 ### Fixed
 - Disambiguated the README and `examples/basic_usage` subscription callback to avoid overload ambiguity on Arduino.

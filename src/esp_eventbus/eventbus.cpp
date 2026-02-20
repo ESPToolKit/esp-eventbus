@@ -24,36 +24,30 @@ bool ESPEventBus::init(const EventBusConfig& config) {
 
     config_ = sanitized;
     stopEventPending_ = false;
+    resetKernelStorage();
+    EventBusVector<Subscription> subStorage{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
+    subs_.swap(subStorage);
 
-    subMutex_ = xSemaphoreCreateMutex();
-    if (!subMutex_) {
+    if (!createKernelMutex()) {
         return false;
     }
 
-    queue_ = xQueueCreate(config_.queueLength, sizeof(QueuedEvent));
-    if (!queue_) {
+    if (!createKernelQueue()) {
         vSemaphoreDelete(subMutex_);
         subMutex_ = nullptr;
+        resetKernelStorage();
         return false;
     }
 
     running_ = true;
     const char* taskName = (config_.taskName && config_.taskName[0] != '\0') ? config_.taskName : "ESPEventBus";
-    BaseType_t res = xTaskCreatePinnedToCore(
-        &ESPEventBus::taskEntry,
-        taskName,
-        config_.stackSize,
-        this,
-        config_.priority,
-        &task_,
-        config_.coreId);
-
-    if (res != pdPASS) {
+    if (!createWorkerTask(taskName)) {
         running_ = false;
         vQueueDelete(queue_);
         queue_ = nullptr;
         vSemaphoreDelete(subMutex_);
         subMutex_ = nullptr;
+        resetKernelStorage();
         return false;
     }
 
@@ -73,7 +67,10 @@ void ESPEventBus::deinit() {
         subMutex_ = nullptr;
     }
 
+    resetKernelStorage();
     subs_.clear();
+    EventBusVector<Subscription> emptySubs{ EventBusAllocator<Subscription>(false) };
+    subs_.swap(emptySubs);
     nextSubId_ = 0;
     stopEventPending_ = false;
     config_ = EventBusConfig{};
@@ -171,7 +168,31 @@ void* ESPEventBus::waitFor(EventBusId id, TickType_t timeout) {
         return nullptr;
     }
 
-    QueueHandle_t responseQueue = xQueueCreate(1, sizeof(void*));
+    QueueHandle_t responseQueue = nullptr;
+    void* responseQueueStorage = nullptr;
+    void* responseQueueControlStorage = nullptr;
+#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
+    if (config_.usePSRAMBuffers) {
+        responseQueueStorage = allocateKernelStorage(sizeof(void*), true);
+        responseQueueControlStorage = allocateKernelStorage(sizeof(StaticQueue_t), true);
+        if (responseQueueStorage && responseQueueControlStorage) {
+            responseQueue = xQueueCreateStatic(
+                1,
+                sizeof(void*),
+                static_cast<uint8_t*>(responseQueueStorage),
+                static_cast<StaticQueue_t*>(responseQueueControlStorage));
+        }
+        if (!responseQueue) {
+            freeKernelStorage(responseQueueStorage);
+            freeKernelStorage(responseQueueControlStorage);
+            responseQueueStorage = nullptr;
+            responseQueueControlStorage = nullptr;
+        }
+    }
+#endif
+    if (!responseQueue) {
+        responseQueue = xQueueCreate(1, sizeof(void*));
+    }
     if (!responseQueue) {
         return nullptr;
     }
@@ -179,6 +200,8 @@ void* ESPEventBus::waitFor(EventBusId id, TickType_t timeout) {
     EventBusSub sid = subscribe(id, &ESPEventBus::waiterCallback, responseQueue, true);
     if (!sid) {
         vQueueDelete(responseQueue);
+        freeKernelStorage(responseQueueStorage);
+        freeKernelStorage(responseQueueControlStorage);
         return nullptr;
     }
 
@@ -187,6 +210,8 @@ void* ESPEventBus::waitFor(EventBusId id, TickType_t timeout) {
 
     unsubscribe(sid);
     vQueueDelete(responseQueue);
+    freeKernelStorage(responseQueueStorage);
+    freeKernelStorage(responseQueueControlStorage);
 
     if (res != pdTRUE) {
         return nullptr;
@@ -208,7 +233,7 @@ void ESPEventBus::taskLoop() {
         return;
     }
 
-    std::vector<Subscription> snapshot;
+    EventBusVector<Subscription> snapshot{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
     snapshot.reserve(4);
 
     QueuedEvent ev;
@@ -457,3 +482,112 @@ TaskHandle_t ESPEventBus::currentTaskHandle() {
     return reinterpret_cast<TaskHandle_t>(pxCurrentTCB);
 }
 #endif
+
+bool ESPEventBus::createKernelMutex() {
+#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
+    if (config_.usePSRAMBuffers) {
+        mutexStorage_ = allocateKernelStorage(sizeof(StaticSemaphore_t), true);
+        if (mutexStorage_) {
+            subMutex_ = xSemaphoreCreateMutexStatic(static_cast<StaticSemaphore_t*>(mutexStorage_));
+            if (subMutex_) {
+                return true;
+            }
+            freeKernelStorage(mutexStorage_);
+            mutexStorage_ = nullptr;
+        }
+    }
+#endif
+    subMutex_ = xSemaphoreCreateMutex();
+    return subMutex_ != nullptr;
+}
+
+bool ESPEventBus::createKernelQueue() {
+#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
+    if (config_.usePSRAMBuffers) {
+        queueStorage_ = allocateKernelStorage(static_cast<size_t>(config_.queueLength) * sizeof(QueuedEvent), true);
+        queueControlStorage_ = allocateKernelStorage(sizeof(StaticQueue_t), true);
+        if (queueStorage_ && queueControlStorage_) {
+            queue_ = xQueueCreateStatic(
+                config_.queueLength,
+                sizeof(QueuedEvent),
+                static_cast<uint8_t*>(queueStorage_),
+                static_cast<StaticQueue_t*>(queueControlStorage_));
+            if (queue_) {
+                return true;
+            }
+        }
+        freeKernelStorage(queueStorage_);
+        freeKernelStorage(queueControlStorage_);
+        queueStorage_ = nullptr;
+        queueControlStorage_ = nullptr;
+    }
+#endif
+    queue_ = xQueueCreate(config_.queueLength, sizeof(QueuedEvent));
+    return queue_ != nullptr;
+}
+
+bool ESPEventBus::createWorkerTask(const char* taskName) {
+#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
+    if (config_.usePSRAMBuffers) {
+        const size_t stackWords = taskStackWords(config_.stackSize);
+        taskStackStorage_ = allocateKernelStorage(stackWords * sizeof(StackType_t), true);
+        taskControlStorage_ = allocateKernelStorage(sizeof(StaticTask_t), true);
+        if (taskStackStorage_ && taskControlStorage_) {
+            task_ = xTaskCreateStaticPinnedToCore(
+                &ESPEventBus::taskEntry,
+                taskName,
+                static_cast<uint32_t>(stackWords),
+                this,
+                config_.priority,
+                static_cast<StackType_t*>(taskStackStorage_),
+                static_cast<StaticTask_t*>(taskControlStorage_),
+                config_.coreId);
+            if (task_) {
+                return true;
+            }
+        }
+        freeKernelStorage(taskStackStorage_);
+        freeKernelStorage(taskControlStorage_);
+        taskStackStorage_ = nullptr;
+        taskControlStorage_ = nullptr;
+    }
+#endif
+    BaseType_t res = xTaskCreatePinnedToCore(
+        &ESPEventBus::taskEntry,
+        taskName,
+        config_.stackSize,
+        this,
+        config_.priority,
+        &task_,
+        config_.coreId);
+    return res == pdPASS;
+}
+
+void ESPEventBus::resetKernelStorage() {
+    freeKernelStorage(mutexStorage_);
+    freeKernelStorage(queueStorage_);
+    freeKernelStorage(queueControlStorage_);
+    freeKernelStorage(taskStackStorage_);
+    freeKernelStorage(taskControlStorage_);
+    mutexStorage_ = nullptr;
+    queueStorage_ = nullptr;
+    queueControlStorage_ = nullptr;
+    taskStackStorage_ = nullptr;
+    taskControlStorage_ = nullptr;
+}
+
+size_t ESPEventBus::taskStackWords(uint32_t stackSizeBytes) {
+    const size_t bytes = static_cast<size_t>(stackSizeBytes);
+    const size_t wordSize = sizeof(StackType_t);
+    return (bytes + (wordSize - 1U)) / wordSize;
+}
+
+void* ESPEventBus::allocateKernelStorage(size_t bytes, bool usePSRAMBuffers) {
+    return eventbus_allocator_detail::allocate(bytes, usePSRAMBuffers);
+}
+
+void ESPEventBus::freeKernelStorage(void* ptr) {
+    if (ptr) {
+        eventbus_allocator_detail::deallocate(ptr);
+    }
+}
