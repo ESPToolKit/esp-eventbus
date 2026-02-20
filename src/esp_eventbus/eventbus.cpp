@@ -24,6 +24,15 @@ bool ESPEventBus::init(const EventBusConfig& config) {
 
     config_ = sanitized;
     stopEventPending_ = false;
+    workerTask_.reset();
+    worker_.deinit();
+    ESPWorker::Config workerConfig{};
+    workerConfig.maxWorkers = 1;
+    workerConfig.stackSizeBytes = config_.stackSize;
+    workerConfig.priority = config_.priority;
+    workerConfig.coreId = config_.coreId;
+    workerConfig.enableExternalStacks = true;
+    worker_.init(workerConfig);
     resetKernelStorage();
     EventBusVector<Subscription> subStorage{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
     subs_.swap(subStorage);
@@ -74,6 +83,9 @@ void ESPEventBus::deinit() {
     nextSubId_ = 0;
     stopEventPending_ = false;
     config_ = EventBusConfig{};
+    workerTask_.reset();
+    worker_.deinit();
+    task_ = nullptr;
 }
 
 bool ESPEventBus::post(EventBusId id, void* payload, TickType_t timeout) {
@@ -229,9 +241,9 @@ void ESPEventBus::taskLoop() {
         running_ = false;
         stopEventPending_ = false;
         task_ = nullptr;
-        vTaskDelete(nullptr);
         return;
     }
+    task_ = currentTaskHandle();
 
     EventBusVector<Subscription> snapshot{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
     snapshot.reserve(4);
@@ -283,26 +295,13 @@ void ESPEventBus::taskLoop() {
 
     running_ = false;
     task_ = nullptr;
-    vTaskDelete(nullptr);
 }
 
 void ESPEventBus::stopTask() {
-    if (!task_) {
+    if (!workerTask_) {
         running_ = false;
         stopEventPending_ = false;
-        return;
-    }
-
-    bool schedulerRunning = true;
-#if defined(INCLUDE_xTaskGetSchedulerState) && (INCLUDE_xTaskGetSchedulerState == 1)
-    schedulerRunning = (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING);
-#endif
-
-    if (!schedulerRunning) {
-        vTaskDelete(task_);
         task_ = nullptr;
-        running_ = false;
-        stopEventPending_ = false;
         return;
     }
 
@@ -315,9 +314,13 @@ void ESPEventBus::stopTask() {
         stopEventPending_ = true;
     }
 
-    while (task_) {
-        vTaskDelay(pdMS_TO_TICKS(1));
+    if (!workerTask_->wait(pdMS_TO_TICKS(3000))) {
+        (void)workerTask_->destroy();
     }
+    workerTask_.reset();
+    task_ = nullptr;
+    running_ = false;
+    stopEventPending_ = false;
 }
 
 void ESPEventBus::compactSubscriptionsLocked() {
@@ -527,40 +530,21 @@ bool ESPEventBus::createKernelQueue() {
 }
 
 bool ESPEventBus::createWorkerTask(const char* taskName) {
-#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
-    if (config_.usePSRAMBuffers) {
-        const size_t stackWords = taskStackWords(config_.stackSize);
-        taskStackStorage_ = allocateKernelStorage(stackWords * sizeof(StackType_t), true);
-        taskControlStorage_ = allocateKernelStorage(sizeof(StaticTask_t), true);
-        if (taskStackStorage_ && taskControlStorage_) {
-            task_ = xTaskCreateStaticPinnedToCore(
-                &ESPEventBus::taskEntry,
-                taskName,
-                static_cast<uint32_t>(stackWords),
-                this,
-                config_.priority,
-                static_cast<StackType_t*>(taskStackStorage_),
-                static_cast<StaticTask_t*>(taskControlStorage_),
-                config_.coreId);
-            if (task_) {
-                return true;
-            }
-        }
-        freeKernelStorage(taskStackStorage_);
-        freeKernelStorage(taskControlStorage_);
-        taskStackStorage_ = nullptr;
-        taskControlStorage_ = nullptr;
+    WorkerConfig taskConfig{};
+    taskConfig.stackSizeBytes = config_.stackSize;
+    taskConfig.priority = config_.priority;
+    taskConfig.coreId = config_.coreId;
+    taskConfig.name = (taskName && taskName[0] != '\0') ? taskName : "ESPEventBus";
+    WorkerResult result = config_.usePSRAMBuffers ? worker_.spawnExt([this]() { taskLoop(); }, taskConfig)
+                                                  : worker_.spawn([this]() { taskLoop(); }, taskConfig);
+    if (!result) {
+        workerTask_.reset();
+        task_ = nullptr;
+        return false;
     }
-#endif
-    BaseType_t res = xTaskCreatePinnedToCore(
-        &ESPEventBus::taskEntry,
-        taskName,
-        config_.stackSize,
-        this,
-        config_.priority,
-        &task_,
-        config_.coreId);
-    return res == pdPASS;
+    workerTask_ = result.handler;
+    task_ = nullptr;
+    return true;
 }
 
 void ESPEventBus::resetKernelStorage() {

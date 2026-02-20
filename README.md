@@ -9,7 +9,7 @@ An asynchronous, FreeRTOS-native event bus for ESP32 projects. Producers post pa
 
 ## Features
 - Tiny API, single header include (`ESPEventBus.h`).
-- Dedicated FreeRTOS worker task with configurable queue depth, stack size, priority, and core affinity.
+- Dedicated worker task managed by `ESPWorker` with configurable queue depth, stack size, priority, and core affinity.
 - Thread-safe and ISR-safe posting (ISRs can queue events without waking the worker unless needed).
 - Unlimited subscriptions per event with optional user data and one-shot semantics.
 - `std::function` callback support so you can bind private member methods or use capturing lambdas.
@@ -96,7 +96,7 @@ Explore the sketches under `examples/`:
 - Overflow policies that drop events fire user callbacks in the posting context—keep those callbacks short and ISR-safe where applicable.
 
 ## API Reference
-- `bool init(const EventBusConfig& cfg = EventBusConfig{})` – creates the subscription mutex, queue, and worker task.
+- `bool init(const EventBusConfig& cfg = EventBusConfig{})` – creates the subscription mutex, queue, and worker task via `ESPWorker`.
 - `bool post(Id id, void* payload, TickType_t timeout = 0)` / `bool postFromISR(...)` – queue an event from tasks or interrupts.
 - `EventBusSub subscribe(Id id, EventCallbackFn cb, void* userArg = nullptr, bool oneshot = false)` – register C-style callbacks; returns `0` on failure.
 - `EventBusSub subscribe(Id id, EventCallback cb, void* userArg = nullptr, bool oneshot = false)` – register `std::function` callbacks (bind/captures).

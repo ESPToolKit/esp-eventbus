@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
+#include <ESPWorker.h>
 #include "eventbus_allocator.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -148,6 +150,8 @@ class ESPEventBus {
     TaskHandle_t task_ = nullptr;
     SemaphoreHandle_t subMutex_ = nullptr;
     EventBusVector<Subscription> subs_;
+    ESPWorker worker_;
+    std::shared_ptr<WorkerHandler> workerTask_;
     EventBusSub nextSubId_ = 0;
     EventBusConfig config_{};
     bool running_ = false;
