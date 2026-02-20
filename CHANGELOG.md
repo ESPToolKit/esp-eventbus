@@ -7,11 +7,11 @@ All notable changes to this project will be documented in this file.
 - Added `std::function` subscription overloads so callers can bind member methods or use capturing lambdas.
 - Added `EventBusConfig::usePSRAMBuffers` and routed subscription/fan-out vectors through `ESPBufferManager` with automatic fallback when PSRAM is unavailable.
 - Added a platform-gated static FreeRTOS allocation path (`configSUPPORT_STATIC_ALLOCATION == 1`) so `usePSRAMBuffers` also covers worker queue/mutex storage via `ESPBufferManager`, with fallback to dynamic FreeRTOS allocation when unavailable.
-- Migrated worker task creation/lifecycle to `ESPWorker` and removed direct `xTaskCreate*`/`vTaskDelete` usage in runtime code.
+- Switched worker task creation/lifecycle back to native FreeRTOS task handling (`xTaskCreatePinnedToCore`/`vTaskDelete`).
 
 ### Fixed
 - Disambiguated the README and `examples/basic_usage` subscription callback to avoid overload ambiguity on Arduino.
-- Hardened worker task creation by always using `ESPWorker::spawn(...)` (non-caps path) to avoid ESP32 `xPortCheckValidTCBMem(...)` asserts observed with caps/static task creation on some ports.
+- Worker task creation now uses native FreeRTOS `xTaskCreatePinnedToCore(...)` and keeps the same non-caps runtime path for broad ESP32 compatibility.
 
 ## [1.0.0] - 2025-11-19
 ### Added

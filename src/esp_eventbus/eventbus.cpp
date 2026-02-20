@@ -24,15 +24,6 @@ bool ESPEventBus::init(const EventBusConfig& config) {
 
     config_ = sanitized;
     stopEventPending_ = false;
-    workerTask_.reset();
-    worker_.deinit();
-    ESPWorker::Config workerConfig{};
-    workerConfig.maxWorkers = 1;
-    workerConfig.stackSizeBytes = config_.stackSize;
-    workerConfig.priority = config_.priority;
-    workerConfig.coreId = config_.coreId;
-    workerConfig.enableExternalStacks = true;
-    worker_.init(workerConfig);
     resetKernelStorage();
     EventBusVector<Subscription> subStorage{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
     subs_.swap(subStorage);
@@ -83,8 +74,6 @@ void ESPEventBus::deinit() {
     nextSubId_ = 0;
     stopEventPending_ = false;
     config_ = EventBusConfig{};
-    workerTask_.reset();
-    worker_.deinit();
     task_ = nullptr;
 }
 
@@ -295,10 +284,11 @@ void ESPEventBus::taskLoop() {
 
     running_ = false;
     task_ = nullptr;
+    vTaskDelete(nullptr);
 }
 
 void ESPEventBus::stopTask() {
-    if (!workerTask_) {
+    if (!task_) {
         running_ = false;
         stopEventPending_ = false;
         task_ = nullptr;
@@ -314,10 +304,14 @@ void ESPEventBus::stopTask() {
         stopEventPending_ = true;
     }
 
-    if (!workerTask_->wait(pdMS_TO_TICKS(3000))) {
-        (void)workerTask_->destroy();
+    TickType_t start = xTaskGetTickCount();
+    while (task_ && (xTaskGetTickCount() - start) <= pdMS_TO_TICKS(3000)) {
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
-    workerTask_.reset();
+    if (task_) {
+        vTaskDelete(task_);
+        task_ = nullptr;
+    }
     task_ = nullptr;
     running_ = false;
     stopEventPending_ = false;
@@ -530,22 +524,11 @@ bool ESPEventBus::createKernelQueue() {
 }
 
 bool ESPEventBus::createWorkerTask(const char* taskName) {
-    WorkerConfig taskConfig{};
-    taskConfig.stackSizeBytes = config_.stackSize;
-    taskConfig.priority = config_.priority;
-    taskConfig.coreId = config_.coreId;
-    taskConfig.name = (taskName && taskName[0] != '\0') ? taskName : "ESPEventBus";
-    // Keep the event-bus worker task on the default FreeRTOS allocation path.
-    // Some ESP32 ports assert on caps/static task creation for TCB memory.
-    WorkerResult result = worker_.spawn([this]() { taskLoop(); }, taskConfig);
-    if (!result) {
-        workerTask_.reset();
-        task_ = nullptr;
-        return false;
-    }
-    workerTask_ = result.handler;
+    const char* resolvedTaskName = (taskName && taskName[0] != '\0') ? taskName : "ESPEventBus";
     task_ = nullptr;
-    return true;
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        &ESPEventBus::taskEntry, resolvedTaskName, config_.stackSize, this, config_.priority, &task_, config_.coreId);
+    return created == pdPASS && task_ != nullptr;
 }
 
 void ESPEventBus::resetKernelStorage() {
