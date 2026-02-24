@@ -61,6 +61,12 @@ void loop() {
     eventBus.post(AppEvent::NetworkGotIP, &payload);
     delay(5000);
 }
+
+void stopEventBusBeforeSleepOrRestart() {
+    if (eventBus.isInitialized()) {
+        eventBus.deinit();
+    }
+}
 ```
 
 Bind private class methods with `std::bind` when needed:
@@ -97,6 +103,8 @@ Explore the sketches under `examples/`:
 
 ## API Reference
 - `bool init(const EventBusConfig& cfg = EventBusConfig{})` – creates the subscription mutex, queue, and worker task with native FreeRTOS task creation.
+- `void deinit()` – idempotent teardown that stops the worker task, releases queue/mutex resources, and clears subscriptions.
+- `bool isInitialized() const` – reports whether runtime resources are currently active.
 - `bool post(Id id, void* payload, TickType_t timeout = 0)` / `bool postFromISR(...)` – queue an event from tasks or interrupts.
 - `EventBusSub subscribe(Id id, EventCallbackFn cb, void* userArg = nullptr, bool oneshot = false)` – register C-style callbacks; returns `0` on failure.
 - `EventBusSub subscribe(Id id, EventCallback cb, void* userArg = nullptr, bool oneshot = false)` – register `std::function` callbacks (bind/captures).
@@ -138,6 +146,7 @@ Combine `pressureCallback` and `dropCallback` to monitor noisy publishers, and w
 - Built and tested on ESP32 (Arduino-ESP32 and ESP-IDF) with FreeRTOS available; other MCUs/frameworks are unsupported.
 - Requires C++17 support and a FreeRTOS configuration that enables `xTaskGetCurrentTaskHandle` (Arduino + ESP-IDF do this by default).
 - Single ESPEventBus instance manages its own worker task; if you construct multiple buses they each allocate their own queue/task resources.
+- Call `deinit()` before deep sleep, component shutdown, or application restart to release worker/task resources explicitly.
 
 ## Tests
 Unity tests run under PlatformIO: plug in an ESP32 dev board and execute `pio test -e esp32dev` from the repo root. The suite covers overflow policies, subscription caps, payload validation, and graceful shutdown.

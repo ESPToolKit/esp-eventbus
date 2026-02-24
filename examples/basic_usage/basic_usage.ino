@@ -61,5 +61,13 @@ void setup() {
 }
 
 void loop() {
+    if (Serial.available() > 0) {
+        const int ch = Serial.read();
+        if ((ch == 'x' || ch == 'X') && eventBus.isInitialized()) {
+            Serial.println("[ESPEventBus] deinitializing by user request");
+            eventBus.deinit();
+        }
+    }
+
     vTaskDelay(pdMS_TO_TICKS(1000));
 }

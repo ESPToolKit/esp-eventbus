@@ -57,6 +57,7 @@ class ESPEventBus {
 
     bool init(const EventBusConfig& config = EventBusConfig{});
     void deinit();
+    bool isInitialized() const;
 
     bool post(EventBusId id, void* payload, TickType_t timeout = 0);
 
@@ -140,6 +141,7 @@ class ESPEventBus {
     bool createKernelMutex();
     bool createKernelQueue();
     bool createWorkerTask(const char* taskName);
+    void resetSubscriptions(bool usePSRAMBuffers);
     void resetKernelStorage();
     static size_t taskStackWords(uint32_t stackSizeBytes);
     static void* allocateKernelStorage(size_t bytes, bool usePSRAMBuffers);
