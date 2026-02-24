@@ -1,6 +1,7 @@
 #include "eventbus.h"
 
 #include <algorithm>
+#include <new>
 
 ESPEventBus::ESPEventBus() = default;
 
@@ -25,8 +26,7 @@ bool ESPEventBus::init(const EventBusConfig& config) {
     config_ = sanitized;
     stopEventPending_ = false;
     resetKernelStorage();
-    EventBusVector<Subscription> subStorage{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
-    subs_.swap(subStorage);
+    resetSubscriptions(config_.usePSRAMBuffers);
 
     if (!createKernelMutex()) {
         return false;
@@ -68,13 +68,15 @@ void ESPEventBus::deinit() {
     }
 
     resetKernelStorage();
-    subs_.clear();
-    EventBusVector<Subscription> emptySubs{ EventBusAllocator<Subscription>(false) };
-    subs_.swap(emptySubs);
+    resetSubscriptions(false);
     nextSubId_ = 0;
     stopEventPending_ = false;
     config_ = EventBusConfig{};
     task_ = nullptr;
+}
+
+bool ESPEventBus::isInitialized() const {
+    return queue_ != nullptr && subMutex_ != nullptr && task_ != nullptr && running_;
 }
 
 bool ESPEventBus::post(EventBusId id, void* payload, TickType_t timeout) {
@@ -529,6 +531,12 @@ bool ESPEventBus::createWorkerTask(const char* taskName) {
     const BaseType_t created = xTaskCreatePinnedToCore(
         &ESPEventBus::taskEntry, resolvedTaskName, config_.stackSize, this, config_.priority, &task_, config_.coreId);
     return created == pdPASS && task_ != nullptr;
+}
+
+void ESPEventBus::resetSubscriptions(bool usePSRAMBuffers) {
+    using SubscriptionVector = EventBusVector<Subscription>;
+    subs_.~SubscriptionVector();
+    new (&subs_) SubscriptionVector{ EventBusAllocator<Subscription>(usePSRAMBuffers) };
 }
 
 void ESPEventBus::resetKernelStorage() {

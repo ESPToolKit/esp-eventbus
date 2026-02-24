@@ -18,6 +18,10 @@ struct DropContext {
     volatile int dropped = 0;
 };
 
+struct CounterContext {
+    volatile int callbacks = 0;
+};
+
 static void slowSubscriber(void*, void* userArg) {
     auto* ctx = static_cast<DropContext*>(userArg);
     if (ctx) {
@@ -30,6 +34,13 @@ static void dropCallback(EventBusId, void*, void* userArg) {
     auto* ctx = static_cast<DropContext*>(userArg);
     if (ctx) {
         ctx->dropped++;
+    }
+}
+
+static void counterCallback(void*, void* userArg) {
+    auto* ctx = static_cast<CounterContext*>(userArg);
+    if (ctx) {
+        ctx->callbacks++;
     }
 }
 
@@ -224,6 +235,53 @@ void test_deinit_completes_when_queue_is_busy() {
     }
 }
 
+void test_deinit_is_safe_before_init_and_idempotent() {
+    ESPEventBus bus;
+    TestPayload payload{};
+
+    TEST_ASSERT_FALSE(bus.isInitialized());
+
+    bus.deinit();
+    TEST_ASSERT_FALSE(bus.isInitialized());
+    TEST_ASSERT_FALSE(bus.post(TestEvent::FastTick, &payload, 0));
+
+    bus.deinit();
+    TEST_ASSERT_FALSE(bus.isInitialized());
+    TEST_ASSERT_FALSE(bus.post(TestEvent::FastTick, &payload, 0));
+}
+
+void test_reinit_clears_subscriptions_and_restores_bus() {
+    ESPEventBus bus;
+    CounterContext ctx{};
+    TestPayload payload{};
+
+    TEST_ASSERT_TRUE(bus.init());
+    TEST_ASSERT_TRUE(bus.isInitialized());
+    TEST_ASSERT_NOT_EQUAL(0U, bus.subscribe(TestEvent::FastTick, counterCallback, &ctx));
+    TEST_ASSERT_TRUE(bus.post(TestEvent::FastTick, &payload, portMAX_DELAY));
+    vTaskDelay(pdMS_TO_TICKS(30));
+    TEST_ASSERT_TRUE(ctx.callbacks > 0);
+
+    bus.deinit();
+    TEST_ASSERT_FALSE(bus.isInitialized());
+
+    const int callbacksAfterFirstRun = ctx.callbacks;
+    TEST_ASSERT_TRUE(bus.init());
+    TEST_ASSERT_TRUE(bus.isInitialized());
+    TEST_ASSERT_TRUE(bus.post(TestEvent::FastTick, &payload, portMAX_DELAY));
+    vTaskDelay(pdMS_TO_TICKS(30));
+    TEST_ASSERT_EQUAL_INT(callbacksAfterFirstRun, ctx.callbacks);
+
+    TEST_ASSERT_NOT_EQUAL(0U, bus.subscribe(TestEvent::FastTick, counterCallback, &ctx));
+    TEST_ASSERT_TRUE(bus.post(TestEvent::FastTick, &payload, portMAX_DELAY));
+    vTaskDelay(pdMS_TO_TICKS(30));
+    TEST_ASSERT_TRUE(ctx.callbacks > callbacksAfterFirstRun);
+
+    bus.deinit();
+    bus.deinit();
+    TEST_ASSERT_FALSE(bus.isInitialized());
+}
+
 void setUp() {
 }
 
@@ -239,6 +297,8 @@ void setup() {
     RUN_TEST(test_drop_newest_policy_discards_incoming_event);
     RUN_TEST(test_pressure_callback_triggers_on_high_usage);
     RUN_TEST(test_deinit_completes_when_queue_is_busy);
+    RUN_TEST(test_deinit_is_safe_before_init_and_idempotent);
+    RUN_TEST(test_reinit_clears_subscriptions_and_restores_bus);
     UNITY_END();
 }
 
