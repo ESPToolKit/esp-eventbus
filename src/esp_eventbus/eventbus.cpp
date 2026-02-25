@@ -236,50 +236,53 @@ void ESPEventBus::taskLoop() {
     }
     task_ = currentTaskHandle();
 
-    EventBusVector<Subscription> snapshot{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
-    snapshot.reserve(4);
+    {
+        // Scope dynamic containers so they release memory before the task self-deletes.
+        EventBusVector<Subscription> snapshot{ EventBusAllocator<Subscription>(config_.usePSRAMBuffers) };
+        snapshot.reserve(4);
 
-    QueuedEvent ev;
+        QueuedEvent ev;
 
-    while (running_) {
-        if (xQueueReceive(queue_, &ev, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
+        while (running_) {
+            if (xQueueReceive(queue_, &ev, portMAX_DELAY) != pdTRUE) {
+                continue;
+            }
 
-        if (ev.stop) {
-            stopEventPending_ = false;
-            break;
-        }
+            if (ev.stop) {
+                stopEventPending_ = false;
+                break;
+            }
 
-        snapshot.clear();
+            snapshot.clear();
 
-        if (xSemaphoreTake(subMutex_, portMAX_DELAY) == pdTRUE) {
-            bool needsCompact = false;
-            for (auto& sub : subs_) {
-                if (!sub.active) {
-                    needsCompact = true;
-                    continue;
-                }
-
-                if (sub.eventId == ev.eventId) {
-                    snapshot.push_back(sub);
-                    if (sub.oneshot) {
-                        sub.active = false;
+            if (xSemaphoreTake(subMutex_, portMAX_DELAY) == pdTRUE) {
+                bool needsCompact = false;
+                for (auto& sub : subs_) {
+                    if (!sub.active) {
                         needsCompact = true;
+                        continue;
+                    }
+
+                    if (sub.eventId == ev.eventId) {
+                        snapshot.push_back(sub);
+                        if (sub.oneshot) {
+                            sub.active = false;
+                            needsCompact = true;
+                        }
                     }
                 }
+
+                if (needsCompact) {
+                    compactSubscriptionsLocked();
+                }
+
+                xSemaphoreGive(subMutex_);
             }
 
-            if (needsCompact) {
-                compactSubscriptionsLocked();
-            }
-
-            xSemaphoreGive(subMutex_);
-        }
-
-        for (auto& sub : snapshot) {
-            if (sub.cb) {
-                sub.cb(ev.payload, sub.userArg);
+            for (auto& sub : snapshot) {
+                if (sub.cb) {
+                    sub.cb(ev.payload, sub.userArg);
+                }
             }
         }
     }
