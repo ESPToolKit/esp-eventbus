@@ -73,18 +73,17 @@ Bind private class methods with `std::bind` when needed:
 
 ```cpp
 eventBus.subscribe(AppEvent::NetworkGotIP,
-                   std::bind(&HostedFirmwareUpdater::onNetEvent,
-                             this,
-                             std::placeholders::_1,
-                             std::placeholders::_2));
+    std::bind(&HostedFirmwareUpdater::onNetEvent,
+    this,
+    std::placeholders::_1,
+    std::placeholders::_2)
+);
 ```
 
 Need to suspend the caller until a payload arrives? `waitFor` creates a one-shot subscription and blocks on a temporary queue:
 
 ```cpp
-auto* payload = static_cast<NetworkGotIpPayload*>(
-    eventBus.waitFor(AppEvent::NetworkGotIP, pdMS_TO_TICKS(1000))
-);
+auto* payload = static_cast<NetworkGotIpPayload*>(eventBus.waitFor(AppEvent::NetworkGotIP, pdMS_TO_TICKS(1000)));
 if (payload) {
     Serial.printf("Received IP %s\n", payload->ip.c_str());
 }
