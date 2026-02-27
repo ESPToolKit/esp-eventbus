@@ -27,6 +27,7 @@ bool ESPEventBus::init(const EventBusConfig& config) {
     stopEventPending_ = false;
     resetKernelStorage();
     resetSubscriptions(config_.usePSRAMBuffers);
+    resetWaiters(config_.usePSRAMBuffers);
 
     if (!createKernelMutex()) {
         return false;
@@ -57,6 +58,13 @@ bool ESPEventBus::init(const EventBusConfig& config) {
 void ESPEventBus::deinit() {
     stopTask();
 
+    if (subMutex_ && xSemaphoreTake(subMutex_, portMAX_DELAY) == pdTRUE) {
+        clearWaiters();
+        xSemaphoreGive(subMutex_);
+    } else {
+        clearWaiters();
+    }
+
     if (queue_) {
         vQueueDelete(queue_);
         queue_ = nullptr;
@@ -69,6 +77,7 @@ void ESPEventBus::deinit() {
 
     resetKernelStorage();
     resetSubscriptions(false);
+    resetWaiters(false);
     nextSubId_ = 0;
     stopEventPending_ = false;
     config_ = EventBusConfig{};
@@ -163,58 +172,42 @@ void ESPEventBus::unsubscribe(EventBusSub subId) {
 }
 
 void* ESPEventBus::waitFor(EventBusId id, TickType_t timeout) {
-    if (!queue_) {
+    if (!queue_ || !subMutex_) {
         return nullptr;
     }
 
-    if (task_ && currentTaskHandle() == task_) {
+    const TaskHandle_t callerTask = currentTaskHandle();
+    if (!callerTask || (task_ && callerTask == task_)) {
         return nullptr;
     }
 
     QueueHandle_t responseQueue = nullptr;
-    void* responseQueueStorage = nullptr;
-    void* responseQueueControlStorage = nullptr;
-#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
-    if (config_.usePSRAMBuffers) {
-        responseQueueStorage = allocateKernelStorage(sizeof(void*), true);
-        responseQueueControlStorage = allocateKernelStorage(sizeof(StaticQueue_t), true);
-        if (responseQueueStorage && responseQueueControlStorage) {
-            responseQueue = xQueueCreateStatic(
-                1,
-                sizeof(void*),
-                static_cast<uint8_t*>(responseQueueStorage),
-                static_cast<StaticQueue_t*>(responseQueueControlStorage));
-        }
-        if (!responseQueue) {
-            freeKernelStorage(responseQueueStorage);
-            freeKernelStorage(responseQueueControlStorage);
-            responseQueueStorage = nullptr;
-            responseQueueControlStorage = nullptr;
-        }
-    }
-#endif
-    if (!responseQueue) {
-        responseQueue = xQueueCreate(1, sizeof(void*));
-    }
-    if (!responseQueue) {
+    if (xSemaphoreTake(subMutex_, portMAX_DELAY) != pdTRUE) {
         return nullptr;
     }
 
-    EventBusSub sid = subscribe(id, &ESPEventBus::waiterCallback, responseQueue, true);
-    if (!sid) {
-        vQueueDelete(responseQueue);
-        freeKernelStorage(responseQueueStorage);
-        freeKernelStorage(responseQueueControlStorage);
+    WaiterContext* waiter = findWaiterLocked(callerTask, id);
+    if (!waiter) {
+        waiters_.push_back(WaiterContext{ callerTask, id, nullptr, nullptr, nullptr });
+        waiter = &waiters_.back();
+        if (!createWaiterQueue(*waiter)) {
+            waiters_.pop_back();
+            xSemaphoreGive(subMutex_);
+            return nullptr;
+        }
+    }
+
+    responseQueue = waiter->queue;
+    if (!responseQueue) {
+        xSemaphoreGive(subMutex_);
         return nullptr;
     }
+
+    (void)xQueueReset(responseQueue);
+    xSemaphoreGive(subMutex_);
 
     void* payload = nullptr;
     BaseType_t res = xQueueReceive(responseQueue, &payload, timeout);
-
-    unsubscribe(sid);
-    vQueueDelete(responseQueue);
-    freeKernelStorage(responseQueueStorage);
-    freeKernelStorage(responseQueueControlStorage);
 
     if (res != pdTRUE) {
         return nullptr;
@@ -276,6 +269,13 @@ void ESPEventBus::taskLoop() {
                     compactSubscriptionsLocked();
                 }
 
+                for (auto& waiter : waiters_) {
+                    if (waiter.eventId != ev.eventId || !waiter.queue) {
+                        continue;
+                    }
+                    (void)xQueueSend(waiter.queue, &ev.payload, 0);
+                }
+
                 xSemaphoreGive(subMutex_);
             }
 
@@ -327,14 +327,6 @@ void ESPEventBus::compactSubscriptionsLocked() {
         std::remove_if(subs_.begin(), subs_.end(),
                        [](const Subscription& sub) { return !sub.active; }),
         subs_.end());
-}
-
-void ESPEventBus::waiterCallback(void* payload, void* userArg) {
-    QueueHandle_t queue = reinterpret_cast<QueueHandle_t>(userArg);
-    if (!queue) {
-        return;
-    }
-    (void)xQueueSend(queue, &payload, 0);
 }
 
 bool ESPEventBus::enqueueFromTask(const QueuedEvent& ev, TickType_t timeout) {
@@ -540,6 +532,63 @@ void ESPEventBus::resetSubscriptions(bool usePSRAMBuffers) {
     using SubscriptionVector = EventBusVector<Subscription>;
     subs_.~SubscriptionVector();
     new (&subs_) SubscriptionVector{ EventBusAllocator<Subscription>(usePSRAMBuffers) };
+}
+
+void ESPEventBus::clearWaiters() {
+    for (auto& waiter : waiters_) {
+        if (waiter.queue) {
+            void* nullPayload = nullptr;
+            (void)xQueueReset(waiter.queue);
+            (void)xQueueSend(waiter.queue, &nullPayload, 0);
+            vQueueDelete(waiter.queue);
+            waiter.queue = nullptr;
+        }
+        freeKernelStorage(waiter.queueStorage);
+        freeKernelStorage(waiter.queueControlStorage);
+        waiter.queueStorage = nullptr;
+        waiter.queueControlStorage = nullptr;
+    }
+    waiters_.clear();
+}
+
+void ESPEventBus::resetWaiters(bool usePSRAMBuffers) {
+    using WaiterVector = EventBusVector<WaiterContext>;
+    waiters_.~WaiterVector();
+    new (&waiters_) WaiterVector{ EventBusAllocator<WaiterContext>(usePSRAMBuffers) };
+}
+
+ESPEventBus::WaiterContext* ESPEventBus::findWaiterLocked(TaskHandle_t ownerTask, EventBusId eventId) {
+    for (auto& waiter : waiters_) {
+        if (waiter.ownerTask == ownerTask && waiter.eventId == eventId) {
+            return &waiter;
+        }
+    }
+    return nullptr;
+}
+
+bool ESPEventBus::createWaiterQueue(WaiterContext& waiter) {
+#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
+    if (config_.usePSRAMBuffers) {
+        waiter.queueStorage = allocateKernelStorage(sizeof(void*), true);
+        waiter.queueControlStorage = allocateKernelStorage(sizeof(StaticQueue_t), true);
+        if (waiter.queueStorage && waiter.queueControlStorage) {
+            waiter.queue = xQueueCreateStatic(
+                1,
+                sizeof(void*),
+                static_cast<uint8_t*>(waiter.queueStorage),
+                static_cast<StaticQueue_t*>(waiter.queueControlStorage));
+        }
+        if (waiter.queue) {
+            return true;
+        }
+        freeKernelStorage(waiter.queueStorage);
+        freeKernelStorage(waiter.queueControlStorage);
+        waiter.queueStorage = nullptr;
+        waiter.queueControlStorage = nullptr;
+    }
+#endif
+    waiter.queue = xQueueCreate(1, sizeof(void*));
+    return waiter.queue != nullptr;
 }
 
 void ESPEventBus::resetKernelStorage() {

@@ -124,11 +124,22 @@ class ESPEventBus {
         bool stop = false;
     };
 
+    struct WaiterContext {
+        TaskHandle_t ownerTask = nullptr;
+        EventBusId eventId = 0;
+        QueueHandle_t queue = nullptr;
+        void* queueStorage = nullptr;
+        void* queueControlStorage = nullptr;
+    };
+
     static void taskEntry(void* arg);
     void taskLoop();
     void stopTask();
     void compactSubscriptionsLocked();
-    static void waiterCallback(void* payload, void* userArg);
+    void clearWaiters();
+    void resetWaiters(bool usePSRAMBuffers);
+    WaiterContext* findWaiterLocked(TaskHandle_t ownerTask, EventBusId eventId);
+    bool createWaiterQueue(WaiterContext& waiter);
     bool enqueueFromTask(const QueuedEvent& ev, TickType_t timeout);
     bool enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityTaskWoken);
     bool handleOverflowFromTask(const QueuedEvent& ev);
@@ -151,6 +162,7 @@ class ESPEventBus {
     TaskHandle_t task_ = nullptr;
     SemaphoreHandle_t subMutex_ = nullptr;
     EventBusVector<Subscription> subs_;
+    EventBusVector<WaiterContext> waiters_;
     EventBusSub nextSubId_ = 0;
     EventBusConfig config_{};
     bool running_ = false;
