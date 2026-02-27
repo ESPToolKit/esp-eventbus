@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Disambiguated the README and `examples/basic_usage` subscription callback to avoid overload ambiguity on Arduino.
 - Worker task creation now uses native FreeRTOS `xTaskCreatePinnedToCore(...)` and keeps the same non-caps runtime path for broad ESP32 compatibility.
 - Hardened subscription-storage teardown/reset so allocator transitions are safe when toggling `usePSRAMBuffers` across lifecycles.
+- Reworked `waitFor` to reuse persistent per-task/per-event waiter queues instead of creating/deleting a queue+subscription on every call, preventing high memory churn in tight loops.
 
 ## [1.0.0] - 2025-11-19
 ### Added

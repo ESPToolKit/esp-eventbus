@@ -13,7 +13,7 @@ An asynchronous, FreeRTOS-native event bus for ESP32 projects. Producers post pa
 - Thread-safe and ISR-safe posting (ISRs can queue events without waking the worker unless needed).
 - Unlimited subscriptions per event with optional user data and one-shot semantics.
 - `std::function` callback support so you can bind private member methods or use capturing lambdas.
-- Per-task `waitFor` helper implemented with short-lived queues so any task can await the next payload.
+- Per-task/per-event `waitFor` helper with persistent waiter queues to avoid per-call heap churn in tight loops.
 - Queue overflow policies, pressure callbacks, and payload validation hooks for defensive firmware.
 - Optional `usePSRAMBuffers` toggle to route subscription/fan-out buffers and (when static FreeRTOS allocation is enabled) queue/mutex storage through `ESPBufferManager` with safe fallback.
 
@@ -80,7 +80,7 @@ eventBus.subscribe(AppEvent::NetworkGotIP,
 );
 ```
 
-Need to suspend the caller until a payload arrives? `waitFor` creates a one-shot subscription and blocks on a temporary queue:
+Need to suspend the caller until a payload arrives? `waitFor` blocks on a reusable waiter queue owned by the calling task/event pair:
 
 ```cpp
 auto* payload = static_cast<NetworkGotIpPayload*>(eventBus.waitFor(AppEvent::NetworkGotIP, pdMS_TO_TICKS(1000)));
@@ -97,6 +97,7 @@ Explore the sketches under `examples/`:
 ## Gotchas
 - The bus only stores the pointer you supply; keep payloads alive for as long as subscribers need them or use pools/ref-counted buffers.
 - `waitFor` refuses to run on the ESPEventBus worker task. Enable `INCLUDE_xTaskGetCurrentTaskHandle=1` (set by default on ESP-IDF/Arduino) so the guard can detect misuse.
+- `waitFor` reuses one waiter queue per `(task, event)` pair. Multiple tasks can wait on the same event concurrently, but avoid overlapping waits for the same `(task, event)` pair.
 - `postFromISR` behaves like `post` but still runs callbacks on the worker. Long callbacks block the worker and delay other subscribers.
 - Overflow policies that drop events fire user callbacks in the posting context—keep those callbacks short and ISR-safe where applicable.
 
@@ -108,7 +109,7 @@ Explore the sketches under `examples/`:
 - `EventBusSub subscribe(Id id, EventCallbackFn cb, void* userArg = nullptr, bool oneshot = false)` – register C-style callbacks; returns `0` on failure.
 - `EventBusSub subscribe(Id id, EventCallback cb, void* userArg = nullptr, bool oneshot = false)` – register `std::function` callbacks (bind/captures).
 - `void unsubscribe(EventBusSub subId)` – deactivate one subscription.
-- `void* waitFor(Id id, TickType_t timeout = portMAX_DELAY)` – block the caller on a temporary queue and return the payload pointer or `nullptr` on timeout.
+- `void* waitFor(Id id, TickType_t timeout = portMAX_DELAY)` – block the caller on a reusable task/event waiter queue and return the payload pointer or `nullptr` on timeout.
 
 `EventBusConfig` exposes guardrails so multiple components can safely share one bus:
 
