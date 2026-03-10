@@ -16,160 +16,149 @@
 using EventBusId = uint16_t;
 using EventBusSub = uint32_t;
 
-using EventCallbackFn = void (*)(void* payload, void* userArg);
-using EventCallback = std::function<void(void* payload, void* userArg)>;
+using EventCallbackFn = void (*)(void *payload, void *userArg);
+using EventCallback = std::function<void(void *payload, void *userArg)>;
 
 enum class EventBusOverflowPolicy : uint8_t {
-    Block,
-    DropNewest,
-    DropOldest,
+	Block,
+	DropNewest,
+	DropOldest,
 };
 
-using EventBusQueuePressureFn = void (*)(UBaseType_t queued, UBaseType_t capacity, void* userArg);
-using EventBusDropFn = void (*)(EventBusId id, void* payload, void* userArg);
-using EventBusPayloadValidatorFn = bool (*)(EventBusId id, void* payload, void* userArg);
+using EventBusQueuePressureFn = void (*)(UBaseType_t queued, UBaseType_t capacity, void *userArg);
+using EventBusDropFn = void (*)(EventBusId id, void *payload, void *userArg);
+using EventBusPayloadValidatorFn = bool (*)(EventBusId id, void *payload, void *userArg);
 
 struct EventBusConfig {
-    uint16_t queueLength = 16;
-    UBaseType_t priority = 5;
-    uint32_t stackSize = 4096 * sizeof(StackType_t);
-    BaseType_t coreId = tskNO_AFFINITY;
-    const char* taskName = "ESPEventBus";
-    uint16_t maxSubscriptions = 0;  // 0 => unlimited
-    bool usePSRAMBuffers = false;
-    EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
-    uint8_t pressureThresholdPercent = 90;  // Percentage (1-100) before invoking pressure callback
-    EventBusQueuePressureFn pressureCallback = nullptr;
-    void* pressureUserArg = nullptr;
-    EventBusDropFn dropCallback = nullptr;
-    void* dropUserArg = nullptr;
-    EventBusPayloadValidatorFn payloadValidator = nullptr;
-    void* payloadValidatorArg = nullptr;
+	uint16_t queueLength = 16;
+	UBaseType_t priority = 5;
+	uint32_t stackSize = 4096 * sizeof(StackType_t);
+	BaseType_t coreId = tskNO_AFFINITY;
+	const char *taskName = "ESPEventBus";
+	uint16_t maxSubscriptions = 0; // 0 => unlimited
+	bool usePSRAMBuffers = false;
+	EventBusOverflowPolicy overflowPolicy = EventBusOverflowPolicy::Block;
+	uint8_t pressureThresholdPercent = 90; // Percentage (1-100) before invoking pressure callback
+	EventBusQueuePressureFn pressureCallback = nullptr;
+	void *pressureUserArg = nullptr;
+	EventBusDropFn dropCallback = nullptr;
+	void *dropUserArg = nullptr;
+	EventBusPayloadValidatorFn payloadValidator = nullptr;
+	void *payloadValidatorArg = nullptr;
 };
 
 class ESPEventBus {
   public:
-    ESPEventBus();
-    ~ESPEventBus();
+	ESPEventBus();
+	~ESPEventBus();
 
-    ESPEventBus(const ESPEventBus&) = delete;
-    ESPEventBus& operator=(const ESPEventBus&) = delete;
+	ESPEventBus(const ESPEventBus &) = delete;
+	ESPEventBus &operator=(const ESPEventBus &) = delete;
 
-    bool init(const EventBusConfig& config = EventBusConfig{});
-    void deinit();
-    bool isInitialized() const;
+	bool init(const EventBusConfig &config = EventBusConfig{});
+	void deinit();
+	bool isInitialized() const;
 
-    bool post(EventBusId id, void* payload, TickType_t timeout = 0);
+	bool post(EventBusId id, void *payload, TickType_t timeout = 0);
 
-    template <typename Id>
-    bool post(Id id, void* payload, TickType_t timeout = 0) {
-        return post(static_cast<EventBusId>(id), payload, timeout);
-    }
+	template <typename Id> bool post(Id id, void *payload, TickType_t timeout = 0) {
+		return post(static_cast<EventBusId>(id), payload, timeout);
+	}
 
-    bool postFromISR(EventBusId id, void* payload, BaseType_t* higherPriorityTaskWoken = nullptr);
+	bool postFromISR(EventBusId id, void *payload, BaseType_t *higherPriorityTaskWoken = nullptr);
 
-    template <typename Id>
-    bool postFromISR(Id id, void* payload, BaseType_t* higherPriorityTaskWoken = nullptr) {
-        return postFromISR(static_cast<EventBusId>(id), payload, higherPriorityTaskWoken);
-    }
+	template <typename Id>
+	bool postFromISR(Id id, void *payload, BaseType_t *higherPriorityTaskWoken = nullptr) {
+		return postFromISR(static_cast<EventBusId>(id), payload, higherPriorityTaskWoken);
+	}
 
-    EventBusSub subscribe(EventBusId id,
-                          EventCallbackFn cb,
-                          void* userArg = nullptr,
-                          bool oneshot = false);
+	EventBusSub
+	subscribe(EventBusId id, EventCallbackFn cb, void *userArg = nullptr, bool oneshot = false);
 
-    EventBusSub subscribe(EventBusId id,
-                          EventCallback cb,
-                          void* userArg = nullptr,
-                          bool oneshot = false);
+	EventBusSub
+	subscribe(EventBusId id, EventCallback cb, void *userArg = nullptr, bool oneshot = false);
 
-    template <typename Id>
-    EventBusSub subscribe(Id id,
-                          EventCallbackFn cb,
-                          void* userArg = nullptr,
-                          bool oneshot = false) {
-        return subscribe(static_cast<EventBusId>(id), cb, userArg, oneshot);
-    }
+	template <typename Id>
+	EventBusSub
+	subscribe(Id id, EventCallbackFn cb, void *userArg = nullptr, bool oneshot = false) {
+		return subscribe(static_cast<EventBusId>(id), cb, userArg, oneshot);
+	}
 
-    template <typename Id>
-    EventBusSub subscribe(Id id,
-                          EventCallback cb,
-                          void* userArg = nullptr,
-                          bool oneshot = false) {
-        return subscribe(static_cast<EventBusId>(id), std::move(cb), userArg, oneshot);
-    }
+	template <typename Id>
+	EventBusSub subscribe(Id id, EventCallback cb, void *userArg = nullptr, bool oneshot = false) {
+		return subscribe(static_cast<EventBusId>(id), std::move(cb), userArg, oneshot);
+	}
 
-    void unsubscribe(EventBusSub subId);
+	void unsubscribe(EventBusSub subId);
 
-    void* waitFor(EventBusId id, TickType_t timeout = portMAX_DELAY);
+	void *waitFor(EventBusId id, TickType_t timeout = portMAX_DELAY);
 
-    template <typename Id>
-    void* waitFor(Id id, TickType_t timeout = portMAX_DELAY) {
-        return waitFor(static_cast<EventBusId>(id), timeout);
-    }
+	template <typename Id> void *waitFor(Id id, TickType_t timeout = portMAX_DELAY) {
+		return waitFor(static_cast<EventBusId>(id), timeout);
+	}
 
   private:
-    struct Subscription {
-        EventBusSub subId = 0;
-        EventBusId eventId = 0;
-        EventCallback cb;
-        void* userArg = nullptr;
-        bool oneshot = false;
-        bool active = false;
-    };
+	struct Subscription {
+		EventBusSub subId = 0;
+		EventBusId eventId = 0;
+		EventCallback cb;
+		void *userArg = nullptr;
+		bool oneshot = false;
+		bool active = false;
+	};
 
-    struct QueuedEvent {
-        EventBusId eventId = 0;
-        void* payload = nullptr;
-        bool stop = false;
-    };
+	struct QueuedEvent {
+		EventBusId eventId = 0;
+		void *payload = nullptr;
+		bool stop = false;
+	};
 
-    struct WaiterContext {
-        TaskHandle_t ownerTask = nullptr;
-        EventBusId eventId = 0;
-        QueueHandle_t queue = nullptr;
-        void* queueStorage = nullptr;
-        void* queueControlStorage = nullptr;
-    };
+	struct WaiterContext {
+		TaskHandle_t ownerTask = nullptr;
+		EventBusId eventId = 0;
+		QueueHandle_t queue = nullptr;
+		void *queueStorage = nullptr;
+		void *queueControlStorage = nullptr;
+	};
 
-    static void taskEntry(void* arg);
-    void taskLoop();
-    void stopTask();
-    void compactSubscriptionsLocked();
-    void clearWaiters();
-    void resetWaiters(bool usePSRAMBuffers);
-    WaiterContext* findWaiterLocked(TaskHandle_t ownerTask, EventBusId eventId);
-    bool createWaiterQueue(WaiterContext& waiter);
-    bool enqueueFromTask(const QueuedEvent& ev, TickType_t timeout);
-    bool enqueueFromISR(const QueuedEvent& ev, BaseType_t* higherPriorityTaskWoken);
-    bool handleOverflowFromTask(const QueuedEvent& ev);
-    bool handleOverflowFromISR(const QueuedEvent& ev, BaseType_t* localWoken);
-    void emitPressureMetricFromTask();
-    void notifyDrop(EventBusId id, void* payload);
-    bool validatePayload(EventBusId id, void* payload) const;
-    void propagateYieldFromISR(BaseType_t localWoken, BaseType_t* higherPriorityTaskWoken);
-    static TaskHandle_t currentTaskHandle();
-    bool createKernelMutex();
-    bool createKernelQueue();
-    bool createWorkerTask(const char* taskName);
-    void resetSubscriptions(bool usePSRAMBuffers);
-    void resetKernelStorage();
-    static size_t taskStackWords(uint32_t stackSizeBytes);
-    static void* allocateKernelStorage(size_t bytes, bool usePSRAMBuffers);
-    static void freeKernelStorage(void* ptr);
+	static void taskEntry(void *arg);
+	void taskLoop();
+	void stopTask();
+	void compactSubscriptionsLocked();
+	void clearWaiters();
+	void resetWaiters(bool usePSRAMBuffers);
+	WaiterContext *findWaiterLocked(TaskHandle_t ownerTask, EventBusId eventId);
+	bool createWaiterQueue(WaiterContext &waiter);
+	bool enqueueFromTask(const QueuedEvent &ev, TickType_t timeout);
+	bool enqueueFromISR(const QueuedEvent &ev, BaseType_t *higherPriorityTaskWoken);
+	bool handleOverflowFromTask(const QueuedEvent &ev);
+	bool handleOverflowFromISR(const QueuedEvent &ev, BaseType_t *localWoken);
+	void emitPressureMetricFromTask();
+	void notifyDrop(EventBusId id, void *payload);
+	bool validatePayload(EventBusId id, void *payload) const;
+	void propagateYieldFromISR(BaseType_t localWoken, BaseType_t *higherPriorityTaskWoken);
+	static TaskHandle_t currentTaskHandle();
+	bool createKernelMutex();
+	bool createKernelQueue();
+	bool createWorkerTask(const char *taskName);
+	void resetSubscriptions(bool usePSRAMBuffers);
+	void resetKernelStorage();
+	static size_t taskStackWords(uint32_t stackSizeBytes);
+	static void *allocateKernelStorage(size_t bytes, bool usePSRAMBuffers);
+	static void freeKernelStorage(void *ptr);
 
-    QueueHandle_t queue_ = nullptr;
-    TaskHandle_t task_ = nullptr;
-    SemaphoreHandle_t subMutex_ = nullptr;
-    EventBusVector<Subscription> subs_;
-    EventBusVector<WaiterContext> waiters_;
-    EventBusSub nextSubId_ = 0;
-    EventBusConfig config_{};
-    bool running_ = false;
-    bool stopEventPending_ = false;
-    void* mutexStorage_ = nullptr;
-    void* queueStorage_ = nullptr;
-    void* queueControlStorage_ = nullptr;
-    void* taskStackStorage_ = nullptr;
-    void* taskControlStorage_ = nullptr;
+	QueueHandle_t queue_ = nullptr;
+	TaskHandle_t task_ = nullptr;
+	SemaphoreHandle_t subMutex_ = nullptr;
+	EventBusVector<Subscription> subs_;
+	EventBusVector<WaiterContext> waiters_;
+	EventBusSub nextSubId_ = 0;
+	EventBusConfig config_{};
+	bool running_ = false;
+	bool stopEventPending_ = false;
+	void *mutexStorage_ = nullptr;
+	void *queueStorage_ = nullptr;
+	void *queueControlStorage_ = nullptr;
+	void *taskStackStorage_ = nullptr;
+	void *taskControlStorage_ = nullptr;
 };

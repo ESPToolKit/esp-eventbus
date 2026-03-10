@@ -151,6 +151,13 @@ Combine `pressureCallback` and `dropCallback` to monitor noisy publishers, and w
 ## Tests
 Unity tests run under PlatformIO: plug in an ESP32 dev board and execute `pio test -e esp32dev` from the repo root. The suite covers overflow policies, subscription caps, payload validation, and graceful shutdown.
 
+## Formatting Baseline
+
+This repository follows the firmware formatting baseline from `esptoolkit-template`:
+- `.clang-format` is the source of truth for C/C++/INO layout.
+- `.editorconfig` enforces tabs (`tab_width = 4`), LF endings, and final newline.
+- Format all tracked firmware sources with `bash scripts/format_cpp.sh`.
+
 ## License
 MIT — see [LICENSE.md](LICENSE.md).
 
