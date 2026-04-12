@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - Worker task creation now uses native FreeRTOS `xTaskCreatePinnedToCore(...)` and keeps the same non-caps runtime path for broad ESP32 compatibility.
 - Hardened subscription-storage teardown/reset so allocator transitions are safe when toggling `usePSRAMBuffers` across lifecycles.
 - Reworked `waitFor` to reuse persistent per-task/per-event waiter queues instead of creating/deleting a queue+subscription on every call, preventing high memory churn in tight loops.
+- CI now pins PIOArduino Core to `v6.1.19` and installs the ESP32 platform via `pio pkg install`, restoring PlatformIO compatibility with the current `platform-espressif32` package.
 
 ## [1.0.0] - 2025-11-19
 ### Added
