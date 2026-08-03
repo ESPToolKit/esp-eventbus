@@ -1,3 +1,10 @@
+> [!WARNING]
+> This repository is deprecated and no longer maintained.
+>
+> Development continues in the completely reworked repository:
+> **[ZekStack/Signal](https://github.com/ZekStack/signal)**
+>
+
 # ESPEventBus
 
 An asynchronous, FreeRTOS-native event bus for ESP32 projects. Producers post payloads and continue running while the bus fan-outs the work on its own task. Consumers subscribe with callbacks or synchronously block for the next matching event with `waitFor`.
